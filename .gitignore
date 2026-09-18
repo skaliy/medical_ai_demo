@@ -1,0 +1,6 @@
+/opencode.json
+.venv/
+__pycache__/
+*.nii.gz
+.DS_Store
+tools/out/

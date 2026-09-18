@@ -1,0 +1,82 @@
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Browser flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright and Chromium
+        run: |
+          npm install -g playwright@1.63.0
+          npx playwright install --with-deps chromium
+
+      - name: Serve app/
+        run: |
+          python3 -m http.server 8077 --directory app &
+          for _ in $(seq 1 40); do
+            curl -sf http://127.0.0.1:8077/case.json >/dev/null && exit 0
+            sleep 0.5
+          done
+          echo "the static server never came up on 8077" >&2
+          exit 1
+
+      - name: Run the demo flow
+        env:
+          BASE: http://127.0.0.1:8077
+          # Empty on purpose: use the bundled Chromium, not an installed Chrome.
+          CHANNEL: ''
+        # Every response is re-served with the shipped Content-Security-Policy, so
+        # the policy in app/_headers is validated by the same flow it protects.
+        run: |
+          CSP="$(grep -m1 'Content-Security-Policy:' app/_headers | cut -d' ' -f4-)"
+          test -n "$CSP" || { echo "no Content-Security-Policy found in app/_headers" >&2; exit 1; }
+          CSP="$CSP" NODE_PATH="$(npm root -g)" node tools/demo_flow.cjs
+
+      - name: Upload screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-flow-screenshots
+          path: tools/out
+          if-no-files-found: ignore
+
+  deploy:
+    name: Cloudflare Pages
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Scoped to the deploy job so pull-request test runs never queue behind, or
+    # get cancelled by, a production deploy.
+    concurrency:
+      group: cloudflare-pages-production
+      # Never interrupt an upload of the assets directory partway through.
+      cancel-in-progress: false
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Deploy static app to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy app --project-name=medical-ai-demo --branch=main

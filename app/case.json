@@ -1,0 +1,39 @@
+{
+  "caseId": "vs_gk_1",
+  "caseTitle": "MR-snitt av hjernen",
+  "assets": {
+    "slice": "assets/slice.png",
+    "overlay": "assets/overlay.png",
+    "mesh": "assets/tumor.glb",
+    "brainTumor": "assets/brain_tumor.glb"
+  },
+  "stack": {
+    "sliceUrl": "assets/slices/slice_%03d.png",
+    "overlayUrl": "assets/slices/overlay_%03d.png",
+    "count": 120,
+    "best": 30,
+    "overlayRange": [
+      25,
+      38
+    ]
+  },
+  "volume": {
+    "exactMl": 3.669,
+    "display": "3,67",
+    "unit": "cm³"
+  },
+  "slice": {
+    "index": 30,
+    "plane": "axial"
+  },
+  "report": {
+    "title": "KI-generert rapportutkast.",
+    "textNob": [
+      "MR caput",
+      "Kontrastladende tumor i cerebellopontine vinkel med utbredelse mot indre øregang, forenlig med vestibularisschwannom. Lett lokal påvirkning av omkringliggende strukturer.",
+      "KI-generert tumorvolum: {volume}.",
+      "R:",
+      "Funn forenlig med vestibularisschwannom. Tumorvolum {volume}, beregnet ved KI-basert 3D-segmentering."
+    ]
+  }
+}

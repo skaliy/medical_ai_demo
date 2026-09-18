@@ -1,0 +1,47 @@
+# Cloudflare Pages response headers for the static demo in this directory.
+# Rules are matched top to bottom; the site-wide block comes first, the narrower
+# cache rules after it.
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Content-Security-Policy: default-src 'self'; img-src 'self' data: blob:; media-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'
+
+# Content-Security-Policy, directive by directive. Validated end to end by
+# `CSP="..." node tools/demo_flow.cjs`, which serves every response with this
+# header and fails on any violation.
+#
+#   img-src ... data:        index.html carries an inline `data:` favicon.
+#   img-src ... blob:        the MRI slice texture embedded in brain_tumor.glb is
+#                            decoded through an <img src="blob:"> in browsers
+#                            without createImageBitmap (older Safari/Firefox).
+#   style-src ... 'unsafe-inline'
+#                            <model-viewer> writes inline styles into its own
+#                            shadow DOM; nothing in app/ uses a style attribute.
+#   script-src ... 'wasm-unsafe-eval'
+#                            model-viewer calls WebAssembly.instantiate while
+#                            setting up its Draco/KTX2 decoders. Without it the
+#                            model still renders, but every visit throws an
+#                            uncaught WebAssembly error. 'wasm-unsafe-eval'
+#                            permits WebAssembly only; eval() stays blocked.
+#   connect-src ... blob:    model-viewer fetches its decoder payload back from
+#                            a blob: URL it created itself.
+#
+# Deliberately absent: worker-src. The shipped GLB files need no decoder worker.
+# A future Draco- or KTX2-compressed asset would, and would need
+# `worker-src 'self' blob:` added here.
+
+# Pinned third-party library; it is replaced only under a new filename.
+/vendor/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Slices, meshes and audio are regenerated in place under stable filenames by
+# prep/prepare_assets.py, so a week rather than a year, and never immutable.
+/assets/*
+  Cache-Control: public, max-age=604800
+
+# The single source of truth for the case; never serve a stale copy.
+/case.json
+  Cache-Control: no-store

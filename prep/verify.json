@@ -1,0 +1,57 @@
+{
+  "shape": [
+    512,
+    512,
+    120
+  ],
+  "zooms_mm": [
+    0.4102,
+    0.4102,
+    1.5
+  ],
+  "orientation": "LPS",
+  "display_orientation": "radiological axial (swapaxes 0/1: rows->P, cols->L)",
+  "intensity_window": [
+    0.0,
+    850.0
+  ],
+  "affine_equal": true,
+  "mask_labels": [
+    0,
+    1
+  ],
+  "mask_slice_k": [
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38
+  ],
+  "shown_slice_k": 30,
+  "stack_count": 120,
+  "voxel_count": 14540,
+  "voxel_volume_mm3": 0.252342,
+  "volume_ml": 3.6691,
+  "marching_cubes_raw_volume_ml": 3.6569,
+  "marching_cubes_smoothed_volume_ml": 3.6549,
+  "tumor_centroid_RAS_mm": [
+    -22.01,
+    7.22,
+    -45.31
+  ],
+  "brain_centroid_RAS_mm": [
+    -2.17,
+    21.12,
+    -14.12
+  ],
+  "laterality": "venstre"
+}

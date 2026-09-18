@@ -1,0 +1,8 @@
+# Python packages needed by prep/prepare_assets.py and prep/verify_assets.py.
+# Neither script runs in the app or in CI; they are offline authoring tools.
+nibabel
+numpy
+scipy
+scikit-image
+trimesh
+Pillow
