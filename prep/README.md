@@ -19,8 +19,16 @@ and `vs_gk_1_seg_refT1.nii.gz`.
 
 ## Run
 
+Install the Python packages into an isolated environment. With the built-in
+`venv`, from the repository root:
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
+```
+
+If you use conda, activate your own environment instead. Then:
+
+```bash
 pip install -r prep/requirements.txt
 python3 prep/prepare_assets.py   # writes app/assets/, app/case.json, prep/verify.json
 python3 prep/verify_assets.py    # exits non-zero on any failure
