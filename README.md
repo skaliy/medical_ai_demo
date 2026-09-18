@@ -9,13 +9,14 @@ It walks through one real MRI case in four steps:
 
 1. Look at an MRI slice and see if anything stands out.
 2. Reveal the tumour area the AI model has marked.
-3. Explore the tumour as a rotatable 3D shape, with its calculated volume.
+3. Scroll through the slices and open the tumour as a rotatable 3D model, with its
+   calculated volume.
 4. Read an AI-generated draft report describing the finding.
 
 The text is in Norwegian, and everything shown is prepared in advance.
 
 Imaging data comes from The Cancer Imaging Archive's
-[Vestibular Schwannoma Segmentation](https://www.cancerimagingarchive.net/collection/vestibular-schwannoma-seg/)
+[Vestibular-Schwannoma-SEG](https://www.cancerimagingarchive.net/collection/vestibular-schwannoma-seg/)
 collection. See [prep/README.md](prep/README.md) for how the assets are derived.
 
 ## Data licence

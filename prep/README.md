@@ -6,10 +6,16 @@ tumour mask: the slice stack, overlays, meshes and `app/case.json`.
 
 ## Source data
 
-Put a T1 image and its tumour mask, both NIfTI (`.nii.gz`, gitignored), in the
-repository root. The file names are set near the top of both scripts. The
-shipped demo uses case `vs_gk_1` from the TCIA collection linked in the
-top-level README.
+The scripts read a contrast-enhanced T1 image and its tumour mask as NIfTI files
+(`.nii.gz`, gitignored) from the repository root. The file names are set near the
+top of both scripts.
+
+The shipped demo uses subject 1 of the TCIA collection linked in the top-level
+README. TCIA distributes it as DICOM. Convert it with the
+[VS_Seg preprocessing scripts](https://github.com/KCL-BMEIS/VS_Seg/tree/master/preprocessing),
+then rename the T1 image and T1-space mask they write for subject 1
+(`vs_gk_t1_refT1.nii.gz`, `vs_gk_seg_refT1.nii.gz`) to `vs_gk_1_t1_refT1.nii.gz`
+and `vs_gk_1_seg_refT1.nii.gz`.
 
 ## Run
 
@@ -20,7 +26,7 @@ python3 prep/prepare_assets.py   # writes app/assets/, app/case.json, prep/verif
 python3 prep/verify_assets.py    # exits non-zero on any failure
 ```
 
-Then shrink the 3D scene (about 8.6 MB to 1.3 MB):
+Then shrink the 3D scene from several megabytes to about 1.4 MB:
 
 ```bash
 npm install @gltf-transform/core@4 @gltf-transform/functions@4 \
