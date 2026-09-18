@@ -26,10 +26,6 @@ collection, which is published under the
 Use of the data is also subject to the
 [TCIA Data Usage Policy](https://www.cancerimagingarchive.net/data-usage-policies-and-restrictions/).
 
-This repository does not ship the original data. The slice images, overlays and
-3D meshes in `app/assets/` and the tumour volume in `app/case.json` are derived
-from one case of the collection, as described in [prep/README.md](prep/README.md).
-
 Data citation:
 
 > Shapey, J., Kujawa, A., Dorent, R., Wang, G., Bisdas, S., Dimitriadis, A.,

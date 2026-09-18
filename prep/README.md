@@ -1,16 +1,15 @@
 # Asset preparation
 
-`prepare_assets.py` builds everything the demo ships from one MRI case: the slice
-stack, overlays, meshes and `app/case.json`. `verify_assets.py` checks the
-shipped files against the source. Neither runs in CI.
+`prepare_assets.py` builds everything the demo ships from one MRI scan and its
+tumour mask: the slice stack, overlays, meshes and `app/case.json`.
+`verify_assets.py` checks the shipped files against the source. Neither runs in CI.
 
 ## Source data
 
-Download these two volumes from the TCIA collection linked in the top-level
-README and put them in the repository root (they are gitignored):
-
-- `vs_gk_1_t1_refT1.nii.gz`: T1 image
-- `vs_gk_1_seg_refT1.nii.gz`: tumour mask
+Put a T1 image and its tumour mask, both NIfTI (`.nii.gz`, gitignored), in the
+repository root. The file names are set near the top of both scripts. The
+shipped demo uses case `vs_gk_1` from the TCIA collection linked in the
+top-level README.
 
 ## Run
 
@@ -30,4 +29,5 @@ node prep/optimize_scene.mjs app/assets/brain_tumor.glb app/assets/brain_tumor.g
 ```
 
 `prepare_assets.py` overwrites `app/case.json`, so edit the report text in its
-`report_paras` list, not in `case.json`.
+`report_paras` list, not in `case.json`. For a new case, rewrite that text and
+`caseId` too: only the volume is filled in automatically.
