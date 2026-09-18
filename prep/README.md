@@ -1,45 +1,27 @@
 # Asset preparation
 
-`prepare_assets.py` turns the source MRI into everything the demo ships:
-the slice stack, the overlays, the meshes and `app/case.json`.
-`verify_assets.py` re-derives the same numbers from the source and checks the
-shipped files against them. Neither script runs in CI or in the browser.
+`prepare_assets.py` builds everything the demo ships from one MRI case: the slice
+stack, overlays, meshes and `app/case.json`. `verify_assets.py` checks the
+shipped files against the source. Neither runs in CI.
 
-## Source files
+## Source data
 
-Both scripts read two NIfTI volumes from the repository root:
+Download these two volumes from the TCIA collection linked in the top-level
+README and put them in the repository root (they are gitignored):
 
-- `vs_gk_1_t1_refT1.nii.gz` — the T1 image
-- `vs_gk_1_seg_refT1.nii.gz` — the tumour segmentation mask
-
-They are gitignored (`*.nii.gz`) and are not part of a clone. Download them from
-the TCIA collection named in the top-level `README.md` and place them in the
-repository root before running anything here.
-
-## Install
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r prep/requirements.txt
-```
+- `vs_gk_1_t1_refT1.nii.gz`: T1 image
+- `vs_gk_1_seg_refT1.nii.gz`: tumour mask
 
 ## Run
 
 ```bash
-python3 prep/prepare_assets.py     # writes app/assets/, app/case.json, prep/verify.json
-python3 prep/verify_assets.py      # re-derives and checks; exits non-zero on any FAIL
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r prep/requirements.txt
+python3 prep/prepare_assets.py   # writes app/assets/, app/case.json, prep/verify.json
+python3 prep/verify_assets.py    # exits non-zero on any failure
 ```
 
-`prepare_assets.py` rewrites `app/case.json` wholesale. Any hand edit to the
-report wording lives in the `report_paras` list inside that script, so edit it
-there rather than in `app/case.json`.
-
-## The gltf-transform post-step
-
-`prepare_assets.py` exports `app/assets/brain_tumor.glb` at roughly 8.6 MB. The
-shipped file is the result of a second pass through `optimize_scene.mjs`, which
-brings it to about 1.3 MB:
+Then shrink the 3D scene (about 8.6 MB to 1.3 MB):
 
 ```bash
 npm install @gltf-transform/core@4 @gltf-transform/functions@4 \
@@ -47,9 +29,5 @@ npm install @gltf-transform/core@4 @gltf-transform/functions@4 \
 node prep/optimize_scene.mjs app/assets/brain_tumor.glb app/assets/brain_tumor.glb
 ```
 
-Run it after every regeneration, otherwise the repository gains several
-megabytes. Its header comment explains why the simplify step must reach the head
-mesh only: the tumour mesh carries the measurement and keeps every triangle.
-
-`verify_assets.py` parses the GLB container directly rather than through
-trimesh, because the compressed file uses `KHR_mesh_quantization`.
+`prepare_assets.py` overwrites `app/case.json`, so edit the report text in its
+`report_paras` list, not in `case.json`.
