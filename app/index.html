@@ -6,118 +6,177 @@
 <meta name="description" content="Forskningsdemo: MR-snitt av hjernen, KI-segmentering av vestibularisschwannom og 3D-visning.">
 <title>MR-snitt av hjernen – forskningsdemo</title>
 <link rel="icon" href="data:,">
+<link rel="preload" href="vendor/fonts/ibm-plex-sans-5.3.0-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="styles.css">
-<script defer src="vendor/model-viewer.min.js"></script>
+<script defer src="vendor/model-viewer.4492ad16.min.js"></script>
 <script defer src="app.js"></script>
 </head>
 <body data-state="inspect">
 
-<main class="main" id="main">
+<!-- All visible text lives in this file. Write {volume} wherever the measured
+     tumour volume belongs; app.js fills it in from case.json. Buttons with two
+     labels carry them as data-label (off) and data-label-active (on). -->
 
-  <section class="state state-inspect" id="state-inspect" aria-labelledby="inspect-h">
+<header class="site-header">
+  <ol class="steps" aria-label="Trinn i demoen">
+    <li class="step" id="step-inspect"><span class="step-num">1</span><span class="step-label">Se selv</span></li>
+    <li class="step" id="step-reveal"><span class="step-num">2</span><span class="step-label">KI-funnet</span></li>
+    <li class="step" id="step-explore"><span class="step-num">3</span><span class="step-label">Utforsk</span></li>
+    <li class="step" id="step-report"><span class="step-num">4</span><span class="step-label">Rapport</span></li>
+  </ol>
+</header>
+
+<main class="workspace" id="main">
+
+  <!-- One image viewport shared by the first three steps, so the marking appears
+       on exactly the pixels the visitor has just been looking at. -->
+  <div class="viewport" id="viewport">
+    <img class="slice-img" id="slice-img" alt="MR-snitt av hjernen">
+    <img class="overlay-img" id="overlay-img" alt="" hidden>
+    <div class="scanline" aria-hidden="true"></div>
+  </div>
+
+  <section class="state" id="state-inspect" aria-labelledby="inspect-h">
     <h2 class="prompt" id="inspect-h" tabindex="-1">Ser du noe som skiller seg ut?</h2>
-    <div class="stage">
-      <img class="slice-img" id="inspect-img" alt="MR-snitt av hjernen uten markering">
-    </div>
-    <div class="actions">
-      <button type="button" class="btn btn-primary" id="btn-to-reveal">Vis KI-funnet.</button>
-    </div>
-  </section>
-
-  <section class="state state-analyzing" id="state-analyzing" aria-labelledby="analyzing-h">
-    <h2 class="prompt" id="analyzing-h" tabindex="-1">KI-modellen analyserer …</h2>
-    <div class="nn-stage" id="nn-stage" role="img"
-         aria-label="Illustrasjon av et kunstig nevralt nettverk"></div>
-    <p class="analyzing-status" id="analyzing-status" role="status" aria-live="polite">Normaliserer bildene …</p>
-    <div class="progress" aria-hidden="true"><div class="progress-fill" id="progress-fill"></div></div>
-    <p class="analyzing-sub"><span id="analyzing-sub"></span></p>
-    <div class="actions">
-      <button type="button" class="btn btn-quiet" id="btn-skip-analysis">Hopp over analysen</button>
-    </div>
-  </section>
-
-  <section class="state state-reveal" id="state-reveal" aria-labelledby="reveal-h">
-    <h2 class="prompt" id="reveal-h" tabindex="-1">Se hva KI-modellen fant</h2>
-    <div class="stage">
-      <img class="slice-img" id="reveal-slice" alt="MR-snitt av hjernen uten markering">
-      <img class="overlay-img" id="reveal-overlay" alt="">
-    </div>
-    <div class="actions">
-      <button type="button" class="btn btn-primary" id="btn-to-explore">Bla i snittene.</button>
-      <button type="button" class="btn btn-secondary" id="btn-reveal-toggle" aria-pressed="true">Skjul markering</button>
-    </div>
-    <p class="caption" id="reveal-caption">Dette er området KI-modellen har markert som svulst.</p>
-  </section>
-
-  <section class="state state-explore" id="state-explore" aria-labelledby="explore-h">
-    <h2 class="prompt" id="explore-h" tabindex="-1" aria-live="polite">Snitt 1 / 1</h2>
-
-    <div class="explore-wrap">
-      <div class="stack" id="ex-stage">
-        <img class="slice-img" id="ex-slice" alt="MR-snitt av hjernen uten markering">
-        <img class="overlay-img" id="ex-overlay" alt="">
+    <div class="panel">
+      <p class="lede">Bildet er ett snitt fra en MR-undersøkelse av hodet. Nesen er øverst og bakhodet nederst.</p>
+      <div class="actions">
+        <button type="button" class="btn btn-primary" id="btn-to-reveal">Vis KI-funnet</button>
       </div>
+    </div>
+  </section>
 
-      <div class="slice-controls">
-        <button type="button" class="btn btn-step" id="btn-slice-prev" aria-label="Forrige snitt">&#8249;</button>
-        <input type="range" id="slice-slider" min="0" max="0" step="1" value="0"
-               aria-label="Bla i MR-snitt">
-        <button type="button" class="btn btn-step" id="btn-slice-next" aria-label="Neste snitt">&#8250;</button>
+  <section class="state" id="state-analyzing" aria-labelledby="analyzing-h">
+    <h2 class="prompt" id="analyzing-h" tabindex="-1"><span class="nowrap">KI-modellen</span> analyserer …</h2>
+    <div class="panel">
+      <div class="nn-stage" id="nn-stage" role="img" aria-label="Illustrasjon av et kunstig nevralt nettverk"></div>
+      <p class="analyzing-status" id="analyzing-status" role="status" aria-live="polite"></p>
+      <div class="progress" aria-hidden="true"><div class="progress-fill" id="progress-fill"></div></div>
+      <p class="note">Animasjonen viser trinnene modellen går gjennom. Resultatet er regnet ut på forhånd.</p>
+      <div class="actions">
+        <button type="button" class="btn btn-quiet" id="btn-skip-analysis">Hopp over analysen</button>
       </div>
-      <div class="actions actions-explore">
-        <button type="button" class="btn btn-primary" id="btn-to-report">Generer KI-rapport.</button>
+    </div>
+    <!-- Shown one after another while the progress bar fills. -->
+    <template id="analyze-steps">
+      <li>Normaliserer bildene …</li>
+      <li>Kjører encoder …</li>
+      <li>Analyserer 3D-blokker …</li>
+      <li>Dekoder segmentering …</li>
+      <li>Beregner tumorvolum …</li>
+    </template>
+  </section>
+
+  <section class="state" id="state-reveal" aria-labelledby="reveal-h">
+    <h2 class="prompt" id="reveal-h" tabindex="-1">Se hva <span class="nowrap">KI-modellen</span> fant</h2>
+    <div class="panel">
+      <p class="legend"><span class="swatch" aria-hidden="true"></span>Dette er området KI-modellen har markert som svulst.</p>
+      <div class="actions">
+        <button type="button" class="btn btn-primary" id="btn-to-explore">Bla i snittene</button>
+        <button type="button" class="btn btn-secondary overlay-toggle" id="btn-reveal-toggle"
+                data-label="Vis markering" data-label-active="Skjul markering"></button>
+      </div>
+    </div>
+  </section>
+
+  <section class="state" id="state-explore" aria-labelledby="explore-h">
+    <h2 class="prompt" id="explore-h" tabindex="-1">Bla gjennom snittene</h2>
+    <div class="panel">
+      <p class="lede">Svulsten strekker seg over flere snitt. Dra i glidebryteren for å følge den gjennom bildeserien.</p>
+      <div class="scrubber">
+        <div class="scrubber-head">
+          <p class="slice-readout" id="slice-readout" aria-live="polite">Snitt <span id="slice-k"></span> / <span id="slice-n"></span></p>
+          <button type="button" class="btn btn-secondary btn-small overlay-toggle" id="btn-explore-toggle"
+                  data-label="Vis markering" data-label-active="Skjul markering"></button>
+        </div>
+        <div class="slice-controls">
+          <button type="button" class="btn btn-step" id="btn-slice-prev" aria-label="Forrige snitt">&#8249;</button>
+          <input type="range" id="slice-slider" min="0" max="0" step="1" value="0" aria-label="Bla i MR-snitt">
+          <button type="button" class="btn btn-step" id="btn-slice-next" aria-label="Neste snitt">&#8250;</button>
+        </div>
+        <p class="legend legend-small"><span class="swatch" aria-hidden="true"></span>Snitt med KI-markering</p>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn btn-primary" id="btn-to-report"
+                data-label="Generer KI-rapport" data-label-active="Vis KI-rapporten"></button>
         <button type="button" class="btn btn-secondary" id="btn-open-3d">Se svulsten i 3D</button>
-        <button type="button" class="btn btn-secondary overlay-toggle" id="btn-explore-toggle" aria-pressed="true">Skjul markering</button>
       </div>
-      <p class="note" id="report-note">Viser et eksempel generert p&aring; forh&aring;nd.</p>
+      <p class="note">Viser et eksempel generert på forhånd.</p>
     </div>
   </section>
 
-  <section class="state state-report" id="state-report" aria-labelledby="report-h">
-    <div class="report-panel">
-      <h2 class="visually-hidden" id="report-h" tabindex="-1">KI-generert rapportutkast</h2>
+  <section class="state" id="state-report" aria-labelledby="report-h">
+    <article class="report">
+      <header class="report-head">
+        <h2 id="report-h" tabindex="-1">KI-generert rapportutkast</h2>
+        <div class="segmented" role="group" aria-label="Versjon av rapporten">
+          <button type="button" id="btn-pro-report" aria-pressed="true">Faglig</button>
+          <button type="button" id="btn-patient-report" aria-pressed="false">Pasientvennlig</button>
+        </div>
+      </header>
+
       <div class="report-layout">
         <div class="report-copy">
-          <div class="report-body" id="report-body"></div>
-          <button type="button" class="btn btn-secondary audio-toggle" id="patient-report-audio-toggle" hidden>Lytt til rapporten</button>
-          <audio class="patient-audio" id="patient-report-audio" preload="none" aria-label="Pasientrapport lyd">
+          <div class="report-body" id="report-body" aria-busy="false"></div>
+          <button type="button" class="btn btn-secondary btn-small" id="patient-report-audio-toggle"
+                  data-label="Lytt til rapporten" data-label-active="Pause rapporten" hidden></button>
+          <audio id="patient-report-audio" preload="none" aria-label="Pasientrapport lyd">
             <source src="assets/audio/vs_funn.mp3" type="audio/mpeg">
-            Nettleseren din st&oslash;tter ikke lydavspilling.
+            Nettleseren din støtter ikke lydavspilling.
           </audio>
+          <p class="report-basis">Grunnlag: 2D-snitt, KI-markering og volum beregnet fra 3D-segmenteringen.</p>
         </div>
         <div class="report-visual">
-          <div class="stage">
-            <img class="slice-img" id="report-slice" alt="MR-snitt av hjernen uten markering">
+          <div class="figure-stage">
+            <img class="slice-img" id="report-slice" alt="MR-snitt av hjernen med KI-markering">
+            <img class="overlay-img" id="report-overlay" alt="">
           </div>
-          <!-- The model-viewer thumbnail is created by app.js, and only when WebGL works. -->
+          <!-- The rotating tumour thumbnail is added by app.js, and only when WebGL works. -->
           <div class="report-volume" id="report-volume"></div>
         </div>
       </div>
-      <p class="report-basis">
-        <span class="report-title">KI-generert rapportutkast. Grunnlag: 2D-snitt, KI-markering og volum beregnet fra 3D-segmenteringen.</span>
-      </p>
+
       <details class="patient-info" id="patient-info" hidden>
         <summary>Hva er et vestibularisschwannom?</summary>
-        <button type="button" class="btn btn-secondary audio-toggle" id="patient-audio-toggle">Spill av lyd</button>
-        <audio class="patient-audio" id="patient-audio" preload="none" aria-label="Forklaring om vestibularisschwannom">
+        <button type="button" class="btn btn-secondary btn-small" id="patient-audio-toggle"
+                data-label="Spill av lyd" data-label-active="Pause lyd"></button>
+        <audio id="patient-audio" preload="none" aria-label="Forklaring om vestibularisschwannom">
           <source src="assets/audio/vs_bergen.mp3" type="audio/mpeg">
-          Nettleseren din st&oslash;tter ikke lydavspilling.
+          Nettleseren din støtter ikke lydavspilling.
         </audio>
         <p>Et vestibularisschwannom er en godartet svulst som oppstår i støttecellene rundt balansenerven, som går mellom det indre øret og hjernen. Godartet betyr at svulsten ikke er kreft og ikke sprer seg til andre deler av kroppen. [1]</p>
         <p>Svulsten vokser som regel langsomt. Den kan påvirke nervene som er viktige for hørsel og balanse, og kan derfor gi nedsatt hørsel, øresus, svimmelhet eller balanseproblemer. [1]</p>
-        <p class="report-sub">Referanse</p>
+        <h3>Referanse</h3>
         <p>[1] National Institute on Deafness and Other Communication Disorders (NIDCD), National Institutes of Health (NIH). <em>Vestibular Schwannoma (Acoustic Neuroma) and Neurofibromatosis</em>.</p>
         <p><a href="https://www.nidcd.nih.gov/health/vestibular-schwannoma-acoustic-neuroma-and-neurofibromatosis" target="_blank" rel="noreferrer">https://www.nidcd.nih.gov/health/vestibular-schwannoma-acoustic-neuroma-and-neurofibromatosis</a></p>
         <p>Sist oppdatert: 6. mars 2017. Lest: 17. september 2026.</p>
-        <p>Den norske forklaringen er en forenklet, bearbeidet tekst basert på kilden, ikke et direkte sitat eller en offisiell oversettelse.</p>
+        <p class="source-note">Den norske forklaringen er en forenklet, bearbeidet tekst basert på kilden, ikke et direkte sitat eller en offisiell oversettelse.</p>
       </details>
-      <div class="actions">
+
+      <div class="actions report-actions">
         <button type="button" class="btn btn-secondary" id="btn-back-explore">Tilbake til snittene</button>
         <button type="button" class="btn btn-secondary" id="btn-report-3d">Se svulsten i 3D</button>
-        <button type="button" class="btn btn-secondary" id="btn-patient-report">Pasientvennlig versjon</button>
-        <button type="button" class="btn btn-primary" id="btn-restart">Start p&aring; nytt</button>
+        <button type="button" class="btn btn-primary" id="btn-restart">Start på nytt</button>
       </div>
-    </div>
+    </article>
+
+    <!-- The two versions of the draft. Each child becomes one block of the report
+         and is typed out the first time its version is shown. -->
+    <template id="report-pro">
+      <h3>MR caput</h3>
+      <p>Kontrastladende tumor i cerebellopontine vinkel med utbredelse mot indre øregang, forenlig med vestibularisschwannom. Lett lokal påvirkning av omkringliggende strukturer.</p>
+      <p>KI-generert tumorvolum: {volume}.</p>
+      <h3>R:</h3>
+      <p>Funn forenlig med vestibularisschwannom. Tumorvolum {volume}, beregnet ved KI-basert 3D-segmentering.</p>
+    </template>
+    <template id="report-patient">
+      <h3>MR av hodet</h3>
+      <p>MR-bildene viser en svulst i området mellom lillehjernen og hjernestammen, med utbredelse inn mot den indre øregangen. Funnet passer med et vestibularisschwannom.</p>
+      <p>Svulsten påvirker vevet rundt i liten grad.</p>
+      <p>Svulstens volum er beregnet til {volume} ved hjelp av kunstig intelligens (KI).</p>
+      <h3>Konklusjon:</h3>
+      <p>Funnene passer med vestibularisschwannom. Beregnet tumorvolum er {volume}.</p>
+    </template>
   </section>
 
 </main>
@@ -136,15 +195,33 @@
   </div>
   <div class="viewer-box">
     <div class="viewer-mount" id="mv-mount"></div>
-    <p class="viewer-loading" id="viewer-loading" role="status" aria-live="polite">Laster 3D-modellen …</p>
+    <p class="viewer-loading" id="viewer-loading" role="status" aria-live="polite" hidden>Laster 3D-modellen …</p>
     <p class="fallback" id="viewer-fallback" hidden>3D-visning utilgjengelig i denne nettleseren.</p>
   </div>
-  <button type="button" class="btn btn-quiet" id="btn-brain-toggle">Skjul skallen</button>
-  <!-- Filled by app.js from case.json, the single source of the volume. -->
-  <p class="volume-line" id="volume-line"></p>
+  <div class="dialog-foot">
+    <p class="volume-line" id="volume-line">Volum beregnet fra KI-markeringen: <strong>{volume}</strong>.</p>
+    <button type="button" class="btn btn-secondary" id="btn-brain-toggle"
+            data-label="Vis skallen" data-label-active="Skjul skallen"></button>
+  </div>
 </dialog>
 
-<p class="load-error" id="load-error" role="alert" hidden>Kunne ikke laste demodata. Last siden p&aring; nytt.</p>
+<!-- The two 3D viewers. They live in templates because a <model-viewer> in the
+     page starts a WebGL renderer as soon as it upgrades, which throws on
+     machines without WebGL; app.js clones them only when WebGL works. The dialog
+     camera starts slightly above and to the side, so the slice plane and the
+     tumour inside the translucent head show before anyone touches it. -->
+<template id="tpl-viewer">
+  <model-viewer alt="3D-modell av svulsten" camera-controls loading="eager" reveal="auto"
+                environment-image="neutral" exposure="1.15" shadow-intensity="0.7"
+                camera-orbit="-30deg 62deg auto" auto-rotate auto-rotate-delay="800"
+                rotation-per-second="12deg"></model-viewer>
+</template>
+<template id="tpl-thumb">
+  <model-viewer id="report-model" alt="3D-modell av svulsten" camera-controls auto-rotate
+                interaction-prompt="none" loading="lazy"></model-viewer>
+</template>
+
+<p class="load-error" id="load-error" role="alert" hidden>Kunne ikke laste demodata. Last siden på nytt.</p>
 
 </body>
 </html>

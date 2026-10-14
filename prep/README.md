@@ -7,15 +7,16 @@ tumour mask: the slice stack, overlays, meshes and `app/case.json`.
 ## Source data
 
 The scripts read a contrast-enhanced T1 image and its tumour mask as NIfTI files
-(`.nii.gz`, gitignored) from the repository root. The file names are set near the
-top of both scripts.
+(`.nii.gz`, gitignored), in LPS orientation on the same voxel grid. By default
+they read `vs_gk_1_t1_refT1.nii.gz` and `vs_gk_1_seg_refT1.nii.gz` from the
+repository root; `--image` and `--mask` point both scripts at other files.
 
 The shipped demo uses subject 1 of the TCIA collection linked in the top-level
 README. TCIA distributes it as DICOM. Convert it with the
 [VS_Seg preprocessing scripts](https://github.com/KCL-BMEIS/VS_Seg/tree/master/preprocessing),
-then rename the T1 image and T1-space mask they write for subject 1
-(`vs_gk_t1_refT1.nii.gz`, `vs_gk_seg_refT1.nii.gz`) to `vs_gk_1_t1_refT1.nii.gz`
-and `vs_gk_1_seg_refT1.nii.gz`.
+which write the T1 image and T1-space mask for subject 1 as
+`vs_gk_t1_refT1.nii.gz` and `vs_gk_seg_refT1.nii.gz`. Rename them to the default
+names above, or pass them with `--image` and `--mask`.
 
 ## Run
 
@@ -31,17 +32,26 @@ If you use conda, activate your own environment instead. Then:
 ```bash
 pip install -r prep/requirements.txt
 python3 prep/prepare_assets.py   # writes app/assets/, app/case.json, prep/verify.json
-python3 prep/verify_assets.py    # exits non-zero on any failure
+# or, with your own files:
+python3 prep/prepare_assets.py --image my_t1.nii.gz --mask my_seg.nii.gz
 ```
 
-Then shrink the 3D scene from several megabytes to about 1.4 MB:
+Shrink the 3D scene from several megabytes to about 1.4 MB (`--no-save` keeps
+npm from writing a `package.json`; `node_modules/` is gitignored):
 
 ```bash
-npm install @gltf-transform/core@4 @gltf-transform/functions@4 \
+npm install --no-save @gltf-transform/core@4 @gltf-transform/functions@4 \
             @gltf-transform/extensions@4 meshoptimizer
 node prep/optimize_scene.mjs app/assets/brain_tumor.glb app/assets/brain_tumor.glb
 ```
 
-`prepare_assets.py` overwrites `app/case.json`, so edit the report text in its
-`report_paras` list, not in `case.json`. For a new case, rewrite that text and
-`caseId` too: only the volume is filled in automatically.
+Then check the result, with the same `--image` and `--mask` if you used them:
+
+```bash
+python3 prep/verify_assets.py    # exits non-zero on any failure
+```
+
+`prepare_assets.py` overwrites `app/case.json`, which holds only values derived
+from the scan: model paths, the slice stack and the volume. The report texts live
+in `app/index.html`. For a new case, rewrite them there and change `CASE_ID` at
+the top of `prepare_assets.py`.

@@ -49,7 +49,7 @@ function record(name, passed, detail) {
 function brief(err) {
   return String((err && err.message) || err)
     // node:assert colours its diffs; the codes only get in the way in a log.
-    .replace(/\[[0-9;]*m/g, '')
+    .replace(/\u001b\[[0-9;]*m/g, '')
     .replace(/\s+/g, ' ')
     .slice(0, 300);
 }
@@ -161,7 +161,11 @@ const playingAudio = (page) =>
     .filter((a) => !a.paused).map((a) => a.id));
 
 const paragraphs = (page) =>
-  page.$$eval('#report-body p', (nodes) => nodes.map((n) => n.textContent));
+  page.$$eval('#report-body > *', (nodes) => nodes.map((n) => n.textContent));
+
+// The report text is authored in index.html; app.js fills {volume} in at boot.
+const templateText = (page, id) =>
+  page.$eval(`#${id}`, (t) => Array.from(t.content.children, (n) => n.textContent));
 
 const hidden = (page, selector) => page.$eval(selector, (node) => node.hidden);
 
@@ -169,6 +173,14 @@ const typingDone = (page) =>
   page.waitForFunction(
     () => document.getElementById('report-body').getAttribute('aria-busy') === 'false',
     undefined, { timeout: 15000 }
+  );
+
+// Closing the 3D dialog must also unmount its viewer, which frees the WebGL context.
+const dialogClosed = (page) =>
+  page.waitForFunction(
+    () => !document.getElementById('viewer-dialog').open &&
+      document.getElementById('mv-mount').children.length === 0,
+    undefined, { timeout: 5000 }
   );
 
 // The footer carries the centre's logo and a contact address, in every state.
@@ -223,6 +235,9 @@ async function toExplore(page) {
   await waitState(page, 'explore');
 }
 
+const currentStep = (page) =>
+  page.$eval('[aria-current="step"]', (n) => n.id);
+
 async function openDialog(page, trigger = '#btn-open-3d') {
   await page.evaluate(() => { window.__mv.loads.length = 0; });
   await page.click(trigger);
@@ -246,15 +261,12 @@ function padded(k) {
   const caseData = await caseRes.json();
 
   const volume = `${caseData.volume.display}${NBSP}${caseData.volume.unit}`;
-  const expectedReport = caseData.report.textNob
-    .map((line) => String(line).trim().split('{volume}').join(volume))
-    .filter(Boolean);
   const best = caseData.stack.best;
   const count = caseData.stack.count;
   const [lo, hi] = caseData.stack.overlayRange;
   const offRange = lo > 0 ? Math.max(0, lo - 20) : hi + 20;
-  const brainTumorAsset = caseData.assets.brainTumor;
-  const tumorAsset = caseData.assets.mesh;
+  const brainTumorAsset = caseData.models.withHead;
+  const tumorAsset = caseData.models.tumorOnly;
 
   const browser = await chromium.launch(Object.assign(
     {
@@ -270,12 +282,14 @@ function padded(k) {
     page = await openPage(browser);
     await page.goto(`${BASE}/`, { waitUntil: 'load' });
     await waitState(page, 'inspect');
+    const expectedReport = await templateText(page, 'report-pro');
 
     // ---- boot ----------------------------------------------------------
     await check('boot: reaches inspect with the load error hidden', async () => {
       assert.equal(await state(page), 'inspect');
-      assert.equal(await page.$eval('#load-error', (n) => n.hidden), true);
-      await page.locator('#inspect-img').evaluate((n) => n.decode());
+      assert.equal(await hidden(page, '#load-error'), true);
+      assert.equal(await currentStep(page), 'step-inspect', 'header step');
+      await page.locator('#slice-img').evaluate((n) => n.decode());
       await shot(page, 'inspect');
     });
 
@@ -288,7 +302,7 @@ function padded(k) {
     });
 
     // ---- state machine -------------------------------------------------
-    await check('state: "Vis KI-funnet." starts the analysis and the progress bar advances', async () => {
+    await check('state: "Vis KI-funnet" starts the analysis and the progress bar advances', async () => {
       await page.click('#btn-to-reveal');
       await waitState(page, 'analyzing');
       await page.waitForFunction(() => {
@@ -306,66 +320,57 @@ function padded(k) {
     });
 
     // ---- overlay alignment ---------------------------------------------
-    await check('overlay: slice and overlay align within 0.5 px in reveal at 1920', async () => {
-      await page.locator('#reveal-overlay').evaluate((n) => n.decode());
-      const delta = await overlap(page, 'reveal-slice', 'reveal-overlay');
+    // Reveal and explore share one viewport, so one pair of boxes covers both.
+    await check('overlay: slice and overlay align within 0.5 px at 1920 and 390', async () => {
+      await page.locator('#overlay-img').evaluate((n) => n.decode());
+      const wide = await overlap(page, 'slice-img', 'overlay-img');
       await shot(page, 'reveal-1920');
-      assert.ok(delta < 0.5, `max box delta ${delta} px`);
-      return `delta ${delta} px`;
+      await page.setViewportSize({ width: 390, height: 844 });
+      const narrow = await overlap(page, 'slice-img', 'overlay-img');
+      await shot(page, 'reveal-390');
+      await page.setViewportSize({ width: 1920, height: 1080 });
+      assert.ok(wide < 0.5 && narrow < 0.5, `1920: ${wide} px, 390: ${narrow} px`);
+      return `1920: ${wide} px, 390: ${narrow} px`;
     });
 
     await page.click('#btn-to-explore');
     await waitState(page, 'explore');
 
-    await check('overlay: slice and overlay align within 0.5 px in explore at 1920', async () => {
-      await page.locator('#ex-overlay').evaluate((n) => n.decode());
-      const delta = await overlap(page, 'ex-slice', 'ex-overlay');
-      assert.ok(delta < 0.5, `max box delta ${delta} px`);
-      return `delta ${delta} px`;
-    });
-
-    await check('overlay: alignment holds at 390 in reveal and explore', async () => {
-      await page.setViewportSize({ width: 390, height: 844 });
-      const inExplore = await overlap(page, 'ex-slice', 'ex-overlay');
-      await shot(page, 'explore-390');
-      await page.evaluate(() => { document.body.dataset.state = 'reveal'; });
-      const inReveal = await overlap(page, 'reveal-slice', 'reveal-overlay');
-      await page.evaluate(() => { document.body.dataset.state = 'explore'; });
-      await page.setViewportSize({ width: 1920, height: 1080 });
-      assert.ok(inReveal < 0.5 && inExplore < 0.5, `reveal ${inReveal}, explore ${inExplore}`);
-      return `reveal ${inReveal} px, explore ${inExplore} px`;
-    });
-
     // ---- slice browser --------------------------------------------------
     await check(`slice browser: opens on the best slice, labelled "Snitt ${best + 1} / ${count}"`, async () => {
-      assert.equal(await text(page, '#explore-h'), `Snitt ${best + 1} / ${count}`);
+      assert.equal(await text(page, '#slice-readout'), `Snitt ${best + 1} / ${count}`);
       assert.equal(await page.$eval('#slice-slider', (n) => n.value), String(best));
       assert.equal(await attr(page, '#slice-slider', 'min'), '0');
       assert.equal(await attr(page, '#slice-slider', 'max'), String(count - 1));
-      assert.equal(await attr(page, '#ex-slice', 'src'), padded(best));
+      assert.equal(await attr(page, '#slice-img', 'src'), padded(best));
       assert.equal(await attr(page, '#slice-slider', 'aria-valuetext'), `Snitt ${best + 1} / ${count}`);
+      // The magenta band on the track covers the slices that carry a marking.
+      const band = await page.$eval('#slice-slider', (n) =>
+        ['--band-start', '--band-end'].map((v) => Number(n.style.getPropertyValue(v))));
+      const at = (k) => k / (count - 1);
+      assert.ok(band[0] < at(lo) && band[1] > at(hi), `band ${band} vs slices ${lo}-${hi}`);
     });
 
     await check('slice browser: slider, prev, next and wheel each land on the expected slice', async () => {
       await setSlice(page, best + 4);
-      assert.equal(await attr(page, '#ex-slice', 'src'), padded(best + 4), 'slider');
+      assert.equal(await attr(page, '#slice-img', 'src'), padded(best + 4), 'slider');
 
       await page.click('#btn-slice-prev');
-      assert.equal(await attr(page, '#ex-slice', 'src'), padded(best + 3), 'prev');
+      assert.equal(await attr(page, '#slice-img', 'src'), padded(best + 3), 'prev');
 
       await page.click('#btn-slice-next');
       await page.click('#btn-slice-next');
-      assert.equal(await attr(page, '#ex-slice', 'src'), padded(best + 5), 'next');
+      assert.equal(await attr(page, '#slice-img', 'src'), padded(best + 5), 'next');
 
-      const box = await page.locator('#ex-stage').boundingBox();
+      const box = await page.locator('#viewport').boundingBox();
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-      const before = Number((await attr(page, '#ex-slice', 'src')).match(/(\d+)\.png$/)[1]);
+      const before = Number((await attr(page, '#slice-img', 'src')).match(/(\d+)\.png$/)[1]);
       await page.mouse.wheel(0, 300);
       await page.waitForFunction(
-        (src) => document.getElementById('ex-slice').getAttribute('src') !== src,
+        (src) => document.getElementById('slice-img').getAttribute('src') !== src,
         padded(before), { timeout: 4000 }
       );
-      const after = Number((await attr(page, '#ex-slice', 'src')).match(/(\d+)\.png$/)[1]);
+      const after = Number((await attr(page, '#slice-img', 'src')).match(/(\d+)\.png$/)[1]);
       assert.ok(after > before, `wheel down moved ${before} -> ${after}`);
     });
 
@@ -373,13 +378,13 @@ function padded(k) {
       await page.$eval('#explore-h', (n) => n.focus());
       await setSlice(page, best);
       await page.keyboard.press('ArrowRight');
-      assert.equal(await attr(page, '#ex-slice', 'src'), padded(best + 1), 'ArrowRight');
+      assert.equal(await attr(page, '#slice-img', 'src'), padded(best + 1), 'ArrowRight');
       await page.keyboard.press('ArrowLeft');
-      assert.equal(await attr(page, '#ex-slice', 'src'), padded(best), 'ArrowLeft');
+      assert.equal(await attr(page, '#slice-img', 'src'), padded(best), 'ArrowLeft');
       await page.keyboard.press('Home');
-      assert.equal(await attr(page, '#ex-slice', 'src'), padded(0), 'Home');
+      assert.equal(await attr(page, '#slice-img', 'src'), padded(0), 'Home');
       await page.keyboard.press('End');
-      assert.equal(await attr(page, '#ex-slice', 'src'), padded(count - 1), 'End');
+      assert.equal(await attr(page, '#slice-img', 'src'), padded(count - 1), 'End');
     });
 
     await check('slice browser: prev and next are disabled at the two ends of the stack', async () => {
@@ -396,25 +401,22 @@ function padded(k) {
       await setSlice(page, best);
       assert.equal(await disabled(page, '#btn-explore-toggle'), false);
       assert.equal(await text(page, '#btn-explore-toggle'), 'Skjul markering');
-      assert.equal(await attr(page, '#btn-explore-toggle', 'aria-pressed'), 'true');
-      assert.equal(await page.$eval('#ex-overlay', (n) => n.hidden), false);
+      assert.equal(await hidden(page, '#overlay-img'), false);
 
       await page.click('#btn-explore-toggle');
       assert.equal(await text(page, '#btn-explore-toggle'), 'Vis markering');
-      assert.equal(await attr(page, '#btn-explore-toggle', 'aria-pressed'), 'false');
-      assert.equal(await page.$eval('#ex-overlay', (n) => n.hidden), true);
+      assert.equal(await hidden(page, '#overlay-img'), true);
 
       await page.click('#btn-explore-toggle');
       assert.equal(await text(page, '#btn-explore-toggle'), 'Skjul markering');
-      assert.equal(await page.$eval('#ex-overlay', (n) => n.hidden), false);
+      assert.equal(await hidden(page, '#overlay-img'), false);
     });
 
     await check(`overlay toggle: on slice ${offRange}, outside the tumour range, it is disabled and reads "Vis markering"`, async () => {
       await setSlice(page, offRange);
       assert.equal(await disabled(page, '#btn-explore-toggle'), true, 'disabled');
-      assert.equal(await attr(page, '#btn-explore-toggle', 'aria-pressed'), 'false', 'aria-pressed');
       assert.equal(await text(page, '#btn-explore-toggle'), 'Vis markering', 'label');
-      assert.equal(await page.$eval('#ex-overlay', (n) => n.hidden), true, 'overlay hidden');
+      assert.equal(await hidden(page, '#overlay-img'), true, 'overlay hidden');
       await setSlice(page, best);
     });
 
@@ -495,26 +497,22 @@ function padded(k) {
 
     await check('3D: the close button closes the dialog and unmounts the viewer', async () => {
       await page.click('#btn-close-3d');
-      await page.waitForFunction(
-        () => !document.getElementById('viewer-dialog').open &&
-          document.getElementById('mv-mount').children.length === 0,
-        undefined, { timeout: 5000 }
-      );
+      await dialogClosed(page);
     });
 
     // ---- report -----------------------------------------------------------
     await check('report: aria-busy is true while the draft types, then false', async () => {
       await page.click('#btn-to-report');
       await waitState(page, 'report');
+      assert.equal(await currentStep(page), 'step-report', 'header step');
       assert.equal(await attr(page, '#report-body', 'aria-busy'), 'true');
-      await page.waitForFunction(
-        () => document.getElementById('report-body').getAttribute('aria-busy') === 'false',
-        undefined, { timeout: 15000 }
-      );
+      await typingDone(page);
     });
 
-    await check('report: the paragraphs are exactly case.json report.textNob with {volume} filled in', async () => {
+    await check('report: the blocks are exactly the index.html draft with {volume} filled in', async () => {
       await shot(page, 'report');
+      assert.ok(expectedReport.some((t) => t.includes(volume)), 'the draft never shows the volume');
+      assert.ok(!(await text(page, 'body')).includes('{volume}'), 'a {volume} placeholder is left on the page');
       assert.deepEqual(await paragraphs(page), expectedReport);
     });
 
@@ -562,20 +560,20 @@ function padded(k) {
     });
 
     await check('report: a version already typed comes back instantly and silently, both ways', async () => {
-      await page.click('#btn-patient-report');
+      await page.click('#btn-pro-report');
       assert.equal(await attr(page, '#report-body', 'aria-busy'), 'false', 'professional version re-typed');
       assert.deepEqual(await paragraphs(page), expectedReport);
-      assert.equal(await text(page, '#btn-patient-report'), 'Pasientvennlig versjon', 'label on the professional version');
+      assert.equal(await attr(page, '#btn-pro-report', 'aria-pressed'), 'true', 'pressed on the professional version');
       assert.equal(await hidden(page, '#patient-report-audio-toggle'), true, 'listen button in the professional version');
 
       await page.click('#btn-patient-report');
       assert.equal(await attr(page, '#report-body', 'aria-busy'), 'false', 'patient version re-typed');
       assert.match(await text(page, '#report-body'), /MR av hodet/, 'patient text');
-      assert.equal(await text(page, '#btn-patient-report'), 'Faglig versjon', 'label on the patient version');
+      assert.equal(await attr(page, '#btn-patient-report', 'aria-pressed'), 'true', 'pressed on the patient version');
       assert.equal(await hidden(page, '#patient-report-audio-toggle'), false, 'listen button in the patient version');
       assert.deepEqual(await playingAudio(page), [], 'a switch started a track by itself');
 
-      await page.click('#btn-patient-report');
+      await page.click('#btn-pro-report');
       assert.deepEqual(await paragraphs(page), expectedReport, 'back on the professional version');
     });
 
@@ -586,18 +584,18 @@ function padded(k) {
       );
       assert.ok(room > 0, 'the report does not scroll at 390, so the reset cannot be observed');
       const scrolled = [];
-      for (let i = 0; i < 2; i++) {
+      for (const target of ['#btn-patient-report', '#btn-pro-report']) {
         // Clicked through the DOM: a Playwright click would scroll the button
         // into view first and hide the very jump this checks for.
         await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
         await page.waitForFunction(() => window.scrollY > 0, undefined, { timeout: 4000 });
         scrolled.push(await page.evaluate(() => Math.round(window.scrollY)));
-        await page.$eval('#btn-patient-report', (node) => node.click());
+        await page.$eval(target, (node) => node.click());
         // The smooth scroll needs a moment; the value itself is the failure message.
         await page.waitForFunction(() => window.scrollY === 0, undefined, { timeout: 6000 })
           .catch(() => {});
         const landed = await page.evaluate(() => Math.round(window.scrollY * 10) / 10);
-        assert.equal(landed, 0, `switch ${i + 1} left the page ${landed} px down`);
+        assert.equal(landed, 0, `switching with ${target} left the page ${landed} px down`);
       }
       await page.setViewportSize({ width: 1920, height: 1080 });
       return `from ${scrolled.join(' and ')} px down`;
@@ -621,7 +619,7 @@ function padded(k) {
       await page.click('#btn-back-explore');
       await waitState(page, 'explore');
       assert.equal(await page.$eval('#slice-slider', (n) => n.value), String(best), 'slice on returning');
-      assert.equal(await text(page, '#explore-h'), `Snitt ${best + 1} / ${count}`, 'slice heading on returning');
+      assert.equal(await text(page, '#slice-readout'), `Snitt ${best + 1} / ${count}`, 'slice readout on returning');
       await page.click('#btn-to-report');
       await waitState(page, 'report');
     });
@@ -632,11 +630,7 @@ function padded(k) {
       assert.equal(await page.$eval('#viewer-dialog', (n) => n.open), true, 'dialog open');
       assert.equal(await state(page), 'report', 'state while the dialog is open');
       await page.keyboard.press('Escape');
-      await page.waitForFunction(
-        () => !document.getElementById('viewer-dialog').open &&
-          document.getElementById('mv-mount').children.length === 0,
-        undefined, { timeout: 5000 }
-      );
+      await dialogClosed(page);
       assert.equal(await state(page), 'report', 'state after closing the dialog');
       assert.deepEqual(await paragraphs(page), before, 'the draft changed while the dialog was open');
     });
@@ -647,7 +641,7 @@ function padded(k) {
       await toExplore(page);
       await page.click('#btn-to-report');
       await waitState(page, 'report');
-      for (let i = 0; i < 6; i++) await page.click('#btn-patient-report');
+      for (let i = 0; i < 6; i++) await page.click(i % 2 ? '#btn-pro-report' : '#btn-patient-report');
       await page.waitForTimeout(400);
       assert.equal(await attr(page, '#report-body', 'aria-busy'), 'false');
       const shown = await paragraphs(page);
@@ -681,8 +675,8 @@ function padded(k) {
       await waitState(page, 'inspect');
       assert.equal(await page.$eval('#slice-slider', (n) => n.value), String(best), 'slider');
       assert.equal(await text(page, '#report-body'), '', 'report body');
-      assert.equal(await text(page, '#btn-to-report'), 'Generer KI-rapport.', 'explore primary button');
-      assert.equal(await page.$eval('#patient-info', (n) => n.hidden), true, 'explainer hidden');
+      assert.equal(await text(page, '#btn-to-report'), 'Generer KI-rapport', 'explore primary button');
+      assert.equal(await hidden(page, '#patient-info'), true, 'explainer hidden');
       assert.equal(await text(page, '#btn-brain-toggle'), 'Skjul skallen', 'skull toggle label');
       assert.equal(await page.$eval('#progress-fill', (n) => n.style.width), '0%', 'progress');
       assert.equal(await page.$eval('#viewer-dialog', (n) => n.open), false, 'dialog');
@@ -712,10 +706,10 @@ function padded(k) {
       const second = await page.$eval('#main', (n) => n.innerHTML);
       assert.equal(first, second, 'the abandoned typing timer kept writing after restart');
 
-      // "Generer KI-rapport." is back and enabled the moment explore is re-entered.
+      // "Generer KI-rapport" is back and enabled the moment explore is re-entered.
       await toExplore(page);
       assert.equal(await disabled(page, '#btn-to-report'), false, 'report button disabled');
-      assert.equal(await text(page, '#btn-to-report'), 'Generer KI-rapport.', 'report button label');
+      assert.equal(await text(page, '#btn-to-report'), 'Generer KI-rapport', 'report button label');
     });
 
     // ---- robustness --------------------------------------------------------
@@ -750,10 +744,7 @@ function padded(k) {
         await waitState(reduced, 'explore');
         await reduced.click('#btn-to-report');
         await waitState(reduced, 'report');
-        await reduced.waitForFunction(
-          () => document.getElementById('report-body').getAttribute('aria-busy') === 'false',
-          undefined, { timeout: 15000 }
-        );
+        await typingDone(reduced);
         assert.deepEqual(await paragraphs(reduced), expectedReport);
         await shot(reduced, 'reduced-motion-report');
         // Nothing types, so the narration button is offered straight away.

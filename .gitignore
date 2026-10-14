@@ -4,3 +4,7 @@ __pycache__/
 *.nii.gz
 .DS_Store
 tools/out/
+# from the gltf-transform install in prep/README.md
+node_modules/
+/package.json
+/package-lock.json

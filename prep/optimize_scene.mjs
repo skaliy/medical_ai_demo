@@ -1,6 +1,6 @@
 // Post-process app/assets/brain_tumor.glb written by prepare_assets.py.
 //
-//   npm install @gltf-transform/core@4 @gltf-transform/functions@4 @gltf-transform/extensions@4 meshoptimizer
+//   npm install --no-save @gltf-transform/core@4 @gltf-transform/functions@4 @gltf-transform/extensions@4 meshoptimizer
 //   node prep/optimize_scene.mjs app/assets/brain_tumor.glb app/assets/brain_tumor.glb
 //
 // Welds vertices, simplifies the HEAD mesh only (the tumor carries the measurement
@@ -20,6 +20,7 @@ const ratio = Number(ratioArg || 0.25);
 
 const io = new NodeIO().registerExtensions(KHRONOS_EXTENSIONS);
 const doc = await io.read(src);
+const srcBytes = fs.statSync(src).size; // before writing: src and dst are usually the same file
 const root = doc.getRoot();
 const byName = (n) => root.listMeshes().find((m) => m.getName() === n);
 const head = byName('brain'), tumor = byName('tumor'), slice = byName('slice');
@@ -46,4 +47,4 @@ for (const p of slice.listPrimitives()) {
 await io.write(dst, doc);
 if (tris(tumor) !== tumorBefore) throw new Error('tumor mesh changed');
 console.log(`head ${headBefore} -> ${tris(head)} triangles, tumor ${tris(tumor)} unchanged, ` +
-  `${(fs.statSync(src).size / 1e6).toFixed(2)} MB -> ${(fs.statSync(dst).size / 1e6).toFixed(2)} MB`);
+  `${(srcBytes / 1e6).toFixed(2)} MB -> ${(fs.statSync(dst).size / 1e6).toFixed(2)} MB`);

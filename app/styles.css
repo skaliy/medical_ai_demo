@@ -1,47 +1,74 @@
-/* MR kiosk demo — a flat, clinical dark frame that keeps the MR images at the
-   centre. Image pixels are never filtered or recoloured, and the chrome around
-   them carries no gradients, glows or drop shadows: one surface, one border,
-   one accent.
+/* MR kiosk demo. A dark reading-room frame that keeps the MR image at the
+   centre of attention. Image pixels are never filtered or recoloured.
 
-   Order: tokens, reset, layout, state machine, components, analyzing, explore,
-   dialog, report, footer, utilities, responsive, reduced motion. */
+   Colour carries meaning, and only two colours speak:
+     --accent   cyan: anything the visitor can press.
+     --finding  magenta: what the AI found. It is the colour baked into the
+                overlay PNGs, so the legend, the slider band and the network's
+                output layer all point at the same thing.
+
+   Order: font, tokens, base, header, workspace layout, shared pieces, buttons,
+   viewport, analyzing, explore, report, dialog, footer, failure states,
+   responsive, reduced motion. */
+
+/* ---------- font ---------- */
+
+/* IBM Plex Sans: an engineered grotesque that suits a research centre, with a
+   tailed l so "KI" (on almost every button) never reads as "Kl", and a plain
+   zero that cannot be mistaken for the Norwegian letter Ø. Self-hosted, because
+   the kiosk runs offline. */
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("vendor/fonts/ibm-plex-sans-5.3.0-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("vendor/fonts/ibm-plex-sans-5.3.0-latin-wght-italic.woff2") format("woff2");
+  font-weight: 100 700;
+  font-style: italic;
+  font-display: swap;
+}
 
 /* ---------- tokens ---------- */
 
 :root {
   color-scheme: dark;
 
-  --bg: #090e17;
-  --surface: #141e2c;
-  --border: #2c3c50;
-  --text: #edf4fa;
-  --muted: #adbdce;
+  --bg: #0a1018;
+  --surface: #111a26;
+  --raised: #182433;
+  --line: #2a3a4e;
+  --text: #edf3f9;
+  --muted: #a6b5c6;
   --accent: #8bd8ed;
   --accent-hover: #b8edfa;
-  --accent-ink: #17202b;
-
-  /* Backdrop behind rendered imagery: MR slices, the 3D viewer, the thumbnail. */
-  --image-bg: #10141c;
-  --overlay-line: #88c0d0;
+  --accent-ink: #0c1a24;
+  --finding: #ff2d95;
+  --finding-fill: rgb(255 45 149 / 0.28);
 
   --warn-border: #d08770;
   --warn-text: #ebcb8b;
   --warn-bg: #3a2d2a;
 
-  --focus: #88c0d0;
-
-  /* One step down from the earlier rounding: clinical, not glossy. */
   --radius: 12px;
   --radius-sm: 8px;
-  --radius-lg: 16px;
+
+  --font: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+
+  /* The MR viewport on wide screens: as tall as the window allows once the
+     header, footer and padding (about 180 px together) are taken off. */
+  --viewport-size: min(100svh - 180px, 52vw, 880px);
 }
 
-/* ---------- reset ---------- */
+/* ---------- base ---------- */
 
 * { box-sizing: border-box; }
 
 html {
-  margin: 0;
   -webkit-text-size-adjust: 100%;
   touch-action: manipulation;
 }
@@ -49,147 +76,219 @@ html {
 body {
   margin: 0;
   min-height: 100svh;
-  background: var(--bg);
-  color: var(--text);
-  font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
-  font-size: 1.0625rem;
-  line-height: 1.6;
   display: flex;
   flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 1.0625rem;
+  line-height: 1.55;
 }
 
 /* Every hidden element stays hidden, whatever a layout rule says. */
 [hidden] { display: none !important; }
 
-/* Safety net for browsers that do not style <dialog> themselves. */
-dialog:not([open]) { display: none; }
+h2, h3, p { margin: 0; }
 
-/* ---------- layout ---------- */
-
-/* The main column grows between the content and the footer; on a tall kiosk
-   screen the active state is centred in it rather than stranded at the top.
-   "safe" keeps the top edge reachable when the content is taller than the box. */
-.main {
-  flex: 1 1 auto;
-  width: 100%;
-  max-width: 1240px;
-  margin: 0 auto;
-  padding: clamp(1.5rem, 4vw, 3rem);
-  display: flex;
-  flex-direction: column;
-  justify-content: safe center;
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
 }
 
-/* ---------- state machine ---------- */
+/* The state headings take focus on every step; the ring is for keyboards only. */
+[tabindex="-1"]:focus:not(:focus-visible) { outline: none; }
+
+/* ---------- header: where am I? ---------- */
+
+.site-header {
+  flex: 0 0 auto;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* The connector to the previous step; it lights up once that step is done. */
+.step + .step::before {
+  content: "";
+  width: clamp(14px, 3.5vw, 56px);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--line);
+}
+.step.is-done + .step::before { background: var(--accent); }
+
+.step-num {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  font-size: 0.9rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.step.is-done .step-num {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.step[aria-current="step"] { color: var(--text); }
+.step[aria-current="step"] .step-num {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* ---------- workspace layout ---------- */
+
+/* Narrow screens: heading, image, controls in one centred column. The active
+   image step's section is display: contents, so its heading and panel drop into
+   the grid areas around the shared viewport. The report is a plain block. */
+.workspace {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 24px 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "head" "view" "panel";
+  gap: 20px;
+  align-content: center;
+  justify-items: center;
+  text-align: center;
+}
 
 .state { display: none; }
 
 body[data-state="inspect"] #state-inspect,
 body[data-state="analyzing"] #state-analyzing,
 body[data-state="reveal"] #state-reveal,
-body[data-state="explore"] #state-explore,
-body[data-state="report"] #state-report {
-  display: flex;
-  animation: state-in 350ms ease both;
+body[data-state="explore"] #state-explore {
+  display: contents;
 }
 
+/* Only the text changes between steps; the image stays put. */
+.state > * { animation: state-in 320ms ease both; }
+
 @keyframes state-in {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
 }
 
-#state-inspect,
-#state-analyzing,
-#state-reveal,
-#state-explore {
+.prompt { grid-area: head; }
+.panel {
+  grid-area: panel;
+  width: min(100%, 600px);
+  display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.25rem;
+  gap: 18px;
 }
 
-#state-report {
-  align-items: center;
-  justify-content: center;
-}
+/* The report is a document of its own and takes the whole width. */
+body[data-state="report"] .workspace { display: block; text-align: left; }
+body[data-state="report"] .viewport { display: none; }
+body[data-state="report"] #state-report { display: block; }
 
 /* ---------- shared pieces ---------- */
 
 .prompt {
-  margin: 0;
-  font-size: clamp(1.5rem, 3.2vw, 2.25rem);
-  font-weight: 650;
-  letter-spacing: -0.035em;
-  text-align: center;
+  font-size: clamp(1.75rem, 1.1rem + 1.7vw, 2.75rem);
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: -0.015em;
   text-wrap: balance;
 }
 
-.caption {
-  margin: 0;
-  max-width: 56ch;
-  text-align: center;
+.lede {
+  max-width: 38ch;
   color: var(--muted);
-  font-size: 1.05rem;
+  font-size: 1.15rem;
+  line-height: 1.5;
+  text-wrap: pretty;
 }
 
 .note {
-  margin: 0;
+  max-width: 46ch;
   color: var(--muted);
   font-size: 0.95rem;
-  max-width: 52ch;
-  text-align: center;
 }
 
-/* The MR stage: a plain frame around untouched pixels — no vignette, no glow. */
-.stage,
-.stack {
-  position: relative;
-  width: min(70vmin, 580px);
-  aspect-ratio: 1 / 1;
-  background: #000;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
+/* A legend entry that looks like the marking itself. */
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 1.1rem;
+  text-align: left;
 }
 
-.slice-img,
-.overlay-img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
+.legend-small {
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.95rem;
 }
 
-.overlay-img {
-  animation: overlay-in 600ms ease both;
+.swatch {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--finding);
+  border-radius: 6px;
+  background: var(--finding-fill);
 }
+.legend-small .swatch { width: 16px; height: 16px; border-radius: 4px; }
 
-@keyframes overlay-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
+.nowrap { white-space: nowrap; }
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 1rem;
-  flex-wrap: wrap;
+  gap: 12px;
 }
 
 /* ---------- buttons ---------- */
 
 .btn {
-  min-height: 58px;
-  padding: 0 1.9rem;
+  min-height: 56px;
+  padding: 0 1.6rem;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   font: inherit;
-  font-size: 1.05rem;
-  font-weight: 600;
+  font-size: 1.0625rem;
+  font-weight: 650;
   cursor: pointer;
   transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.btn:active:not(:disabled) { transform: translateY(1px); }
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .btn-primary {
@@ -199,79 +298,130 @@ body[data-state="report"] #state-report {
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 
 .btn-secondary {
-  background: var(--surface);
+  background: var(--raised);
   color: var(--text);
-  border-color: var(--border);
+  border-color: var(--line);
 }
 .btn-secondary:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 
 .btn-quiet {
+  padding: 0 4px;
   background: transparent;
   color: var(--muted);
-  border-color: transparent;
   text-decoration: underline;
   text-underline-offset: 4px;
   text-decoration-thickness: 1px;
 }
-.btn-quiet:hover:not(:disabled) { color: var(--accent); }
+.btn-quiet:hover { color: var(--accent); }
 
-.btn:active { transform: translateY(1px); }
-
-/* The slice steppers and the explore overlay toggle all switch off at times. */
-.btn:disabled,
-.btn-step:disabled {
-  opacity: 0.45;
-  cursor: default;
-  text-decoration: none;
+.btn-small {
+  min-height: 44px;
+  padding: 0 1rem;
+  font-size: 0.95rem;
 }
 
-/* ---------- focus ---------- */
+/* ---------- image viewport ---------- */
 
-.btn:focus-visible,
-button:focus-visible,
-input:focus-visible,
-summary:focus-visible,
-a:focus-visible,
-dialog:focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 3px;
+/* A plain frame around untouched pixels: no vignette, no glow. */
+.viewport,
+.figure-stage {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 
-/* The state headings take focus on every step, so they need a ring of their own. */
-.prompt:focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 4px;
-  border-radius: 6px;
+.viewport {
+  grid-area: view;
+  width: min(100%, 600px);
 }
 
-/* ---------- analyzing: neural net animation ---------- */
+.slice-img,
+.overlay-img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* The one orchestrated moment: while the model "analyses", a scan line sweeps
+   the image; on the reveal it makes one last pass and paints the marking in
+   behind it. */
+.scanline {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+body[data-state="analyzing"] .scanline {
+  display: block;
+  animation: scan 1.6s ease-in-out infinite alternate;
+}
+
+body[data-state="reveal"] .scanline {
+  display: block;
+  animation: scan-once 1.1s ease-out both;
+}
+
+body[data-state="reveal"] .overlay-img {
+  animation: paint-down 1.1s ease-out both;
+}
+
+@keyframes scan {
+  from { top: 0; }
+  to { top: calc(100% - 2px); }
+}
+
+@keyframes scan-once {
+  0% { top: 0; opacity: 1; }
+  85% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+@keyframes paint-down {
+  from { clip-path: inset(0 0 100% 0); }
+  to { clip-path: inset(0); }
+}
+
+/* ---------- analyzing ---------- */
 
 .nn-stage {
-  width: min(92vw, 620px);
-  height: clamp(220px, 38vmin, 340px);
-  background: var(--image-bg);
-  border: 1px solid var(--border);
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 240px;
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
 }
 
 .nn-edge {
-  stroke: #434c5e;
+  stroke: #3a4c63;
   stroke-width: 1.5;
   stroke-dasharray: 5 9;
   animation: nn-flow 1.1s linear infinite;
 }
 
 .nn-node {
-  fill: #3b4252;
-  stroke: var(--overlay-line);
+  fill: var(--raised);
+  stroke: var(--accent);
   stroke-width: 2.5;
   transform-box: fill-box;
   transform-origin: center;
   animation: nn-pulse 1.7s ease-in-out infinite;
 }
 
-.nn-node.nn-out { stroke: #b48ead; fill: #434c5e; }
+/* The output layer is the finding. */
+.nn-node.nn-out { stroke: var(--finding); }
 
 @keyframes nn-flow { to { stroke-dashoffset: -28; } }
 
@@ -281,146 +431,324 @@ dialog:focus-visible {
 }
 
 .analyzing-status {
-  margin: 0;
-  min-height: 1.6em;
-  font-size: 1.15rem;
-  font-weight: 600;
+  min-height: 1.55em;
   color: var(--accent);
-  text-align: center;
-}
-
-.analyzing-sub {
-  margin: 0;
-  color: var(--muted);
-  text-align: center;
-  max-width: 52ch;
+  font-size: 1.15rem;
+  font-weight: 650;
 }
 
 .progress {
-  width: min(420px, 80vw);
-  height: 5px;
-  border-radius: 999px;
-  background: var(--border);
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
   overflow: hidden;
 }
 
 .progress-fill {
-  height: 100%;
   width: 0;
-  border-radius: inherit;
+  height: 100%;
   background: var(--accent);
 }
 
 /* ---------- explore: slice browser ---------- */
 
-.explore-wrap {
+.scrubber {
+  width: 100%;
   display: flex;
   flex-direction: column;
+  gap: 8px;
+}
+
+.scrubber-head {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
-  width: 100%;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+
+.slice-readout {
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .slice-controls {
   display: flex;
   align-items: center;
-  gap: 0.8rem;
-  width: min(70vmin, 580px);
-  margin-top: 0.75rem;
+  gap: 10px;
   padding: 6px;
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
 }
 
 .btn-step {
-  min-width: 56px;
+  min-width: 52px;
   min-height: 52px;
   padding: 0;
-  background: var(--surface);
+  background: var(--raised);
   color: var(--text);
-  border-color: var(--border);
+  border-color: var(--line);
   font-size: 1.6rem;
   line-height: 1;
 }
 .btn-step:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 
+/* The track carries a magenta band over the slices with a marking. app.js sets
+   --band-start and --band-end (0 to 1); the thumb's centre travels from half a
+   thumb in from each end, hence the calc. The thumb is a narrow playhead so it
+   never hides the band; a tap anywhere on the track still jumps there. */
 #slice-slider {
+  --thumb: 10px;
+  --thumb-h: 32px;
+  --track-h: 12px;
+  --band-start: 0;
+  --band-end: 0;
+  --track: linear-gradient(90deg,
+    var(--line) calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--band-start)),
+    var(--finding) 0,
+    var(--finding) calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--band-end)),
+    var(--line) 0);
   flex: 1 1 auto;
   min-width: 0;
-  height: 40px;
-  accent-color: var(--accent);
-  cursor: ew-resize;
+  height: 44px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
-#slice-slider::-webkit-slider-thumb { cursor: grab; }
+#slice-slider::-webkit-slider-runnable-track {
+  height: var(--track-h);
+  border-radius: 3px;
+  background: var(--track);
+}
 
-/* Explore and the report share one action-row pattern: a centred row that wraps
-   instead of overflowing, and stacks into two columns on phones. */
-.actions-explore,
-:where(.report-panel) .actions {
-  justify-content: center;
+#slice-slider::-moz-range-track {
+  height: var(--track-h);
+  border-radius: 3px;
+  background: var(--track);
+}
+
+#slice-slider::-webkit-slider-thumb {
+  box-sizing: border-box;  /* the universal rule does not reach pseudo-elements */
+  width: var(--thumb);
+  height: var(--thumb-h);
+  margin-top: calc((var(--track-h) - var(--thumb-h)) / 2);
+  border: 2px solid var(--bg);
+  border-radius: 4px;
+  background: var(--accent);
+  cursor: grab;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+#slice-slider::-moz-range-thumb {
+  box-sizing: border-box;
+  width: var(--thumb);
+  height: var(--thumb-h);
+  border: 2px solid var(--bg);
+  border-radius: 4px;
+  background: var(--accent);
+  cursor: grab;
+}
+
+/* ---------- report ---------- */
+
+.report {
+  width: min(100%, 1180px);
+  margin: 0 auto;
+  padding: clamp(20px, 3vw, 40px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.report-head {
+  display: flex;
   flex-wrap: wrap;
-  gap: 0.65rem;
-  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
 }
-.actions-explore { margin-top: 0.75rem; }
 
-.actions-explore .btn,
-:where(.report-panel) .actions .btn {
+.report-head h2 {
+  font-size: clamp(1.5rem, 1.2rem + 0.8vw, 2rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Two versions of one draft: both are visible, the current one is pressed. */
+.segmented {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.segmented button {
+  min-height: 46px;
+  padding: 0 1.1rem;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.segmented button:hover { color: var(--accent); }
+.segmented button[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.report-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 340px);
+  gap: clamp(24px, 4vw, 56px);
+  align-items: start;
+}
+
+.report-copy {
   min-width: 0;
-  padding-left: 1.1rem;
-  padding-right: 1.1rem;
-  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 20px;
 }
 
-.overlay-toggle { align-self: center; }
+.report-body {
+  max-width: 64ch;
+  font-size: 1.125rem;
+  line-height: 1.7;
+}
+.report-body > * + * { margin-top: 0.7em; }
+.report-body h3 {
+  font-size: 1rem;
+  font-weight: 700;
+}
+.report-body > h3:first-child { font-size: 1.35rem; }
+.report-body > p + h3 { margin-top: 1.2em; }
+
+/* A caret while the draft types itself out. */
+.report-body[aria-busy="true"]::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  vertical-align: -0.15em;
+  background: var(--accent);
+  animation: cursor-blink 800ms steps(2) infinite;
+}
+
+@keyframes cursor-blink { 50% { opacity: 0; } }
+
+.report-basis {
+  align-self: stretch;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.report-visual {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* #report-model, added by app.js only when WebGL works; shown only in the wide
+   landscape layout, where the report has room beside the text. */
+.report-volume { display: none; }
+.report-volume model-viewer {
+  display: block;
+  width: 100%;
+  height: clamp(160px, 24vh, 240px);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.patient-info {
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--muted);
+}
+
+.patient-info summary {
+  color: var(--accent);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.patient-info[open] summary { margin-bottom: 14px; }
+.patient-info p,
+.patient-info h3 { max-width: 80ch; margin-top: 12px; }
+.patient-info h3 { color: var(--text); font-size: 1rem; }
+.patient-info a { color: var(--accent); overflow-wrap: anywhere; }
+.patient-info .source-note { font-style: italic; }
+
+.report-actions { justify-content: flex-start; }
+.report-actions #btn-restart { margin-left: auto; }
 
 /* ---------- 3D dialog ---------- */
 
 #viewer-dialog {
-  width: min(92vw, 640px);
-  padding: 1.5rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  width: min(94vw, 960px);
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
-  box-shadow: 0 10px 30px #0007;
 }
 
 #viewer-dialog::backdrop {
-  background: #030912cc;
-  backdrop-filter: blur(12px);
+  background: rgb(3 9 18 / 0.82);
+  backdrop-filter: blur(10px);
 }
 
-.dialog-head {
+.dialog-head,
+.dialog-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1rem;
+  gap: 16px;
 }
 
-.dialog-head h2 { margin: 0; font-size: 1.3rem; font-weight: 600; }
+.dialog-head { margin-bottom: 16px; }
+.dialog-head h2 { font-size: 1.4rem; font-weight: 700; }
+.dialog-foot { margin-top: 16px; }
 
 .btn-close {
-  min-height: 40px;
-  min-width: 40px;
+  min-width: 48px;
+  min-height: 48px;
   padding: 0;
   background: transparent;
-  border: 1px solid var(--border);
   color: var(--muted);
-  font-size: 1.4rem;
+  border-color: var(--line);
+  font-size: 1.5rem;
   line-height: 1;
-  cursor: pointer;
 }
-.btn-close:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.btn-close:hover { border-color: var(--accent); color: var(--accent); }
 
 .viewer-box {
   position: relative;
-  width: 100%;
-  height: clamp(280px, 48vmin, 440px);
-  background: var(--image-bg);
+  height: clamp(300px, 62vh, 640px);
+  background: var(--bg);
   border-radius: var(--radius);
   overflow: hidden;
 }
@@ -431,9 +759,7 @@ dialog:focus-visible {
   position: absolute;
   inset: 50% auto auto 50%;
   transform: translate(-50%, -50%);
-  margin: 0;
   color: var(--muted);
-  font-size: 1rem;
 }
 
 .viewer-loading::after {
@@ -442,23 +768,17 @@ dialog:focus-visible {
   width: 0.8em;
   height: 0.8em;
   margin-left: 0.55rem;
-  border: 2px solid var(--border);
+  vertical-align: -0.1em;
+  border: 2px solid var(--line);
   border-top-color: var(--accent);
   border-radius: 50%;
-  animation: viewer-spin 800ms linear infinite;
-  vertical-align: -0.1em;
+  animation: spin 800ms linear infinite;
 }
 
-@keyframes viewer-spin { to { transform: rotate(360deg); } }
+@keyframes spin { to { transform: rotate(360deg); } }
 
-.volume-line {
-  margin: 1.1rem 0 0;
-  font-size: 1.25rem;
-  font-weight: 650;
-}
+.volume-line { font-size: 1.25rem; }
 
-/* Both viewers are created in JS; a <model-viewer> in the markup would spin up
-   a WebGL context the moment it upgrades. */
 model-viewer {
   width: 100%;
   height: 100%;
@@ -466,148 +786,30 @@ model-viewer {
   background-color: transparent;
 }
 
-/* ---------- report ---------- */
-
-.report-panel {
-  width: min(100%, 1040px);
-  padding: clamp(1.5rem, 4vw, 2.5rem);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-}
-
-.report-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
-  gap: clamp(1.25rem, 4vw, 2.5rem);
-  align-items: center;
-}
-
-.report-copy { min-width: 0; }
-.report-copy > .audio-toggle { margin-top: 1rem; }
-
-.report-body { line-height: 1.8; }
-.report-body p { margin: 0 0 0.75rem; }
-.report-body p:last-child { margin-bottom: 0; }
-.report-body .report-sub { font-weight: 700; color: var(--accent); margin-bottom: 0.3rem; }
-.report-body .report-sub:first-child {
-  font-size: 1.4rem;
-  letter-spacing: -0.025em;
-  margin-bottom: 1rem;
-}
-
-/* A caret while the draft types itself out. */
-.report-body[aria-busy="true"]::after {
-  content: '';
-  display: inline-block;
-  width: 7px;
-  height: 1em;
-  background: var(--accent);
-  animation: cursor-blink 800ms steps(2) infinite;
-}
-
-@keyframes cursor-blink { 50% { opacity: 0; } }
-
-.report-visual { width: 100%; }
-.report-visual .stage { width: 100%; }
-
-.report-volume { display: none; margin-top: 1rem; }
-
-/* #report-model, added by app.js only when WebGL works. */
-.report-volume model-viewer {
-  display: block;
-  width: 100%;
-  height: 250px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--image-bg);
-}
-
-.report-basis {
-  margin: 0;
-  padding: 0.7rem 1rem;
-  background: #0a142080;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--muted);
-  font-size: 0.9rem;
-  font-style: italic;
-  text-align: center;
-}
-
-.report-basis .report-title {
-  display: inline;
-  margin: 0;
-  font-size: inherit;
-  font-weight: 400;
-  font-style: italic;
-  color: var(--muted);
-}
-
-/* Audio elements are driven by their own buttons and never shown. */
-.patient-audio {
-  width: min(100%, 480px);
-  margin-bottom: 0.75rem;
-}
-
-.audio-toggle {
-  min-height: 40px;
-  padding: 0 1rem;
-  font-size: 0.9rem;
-}
-
-.patient-info {
-  margin-top: 0.25rem;
-  padding: 0.9rem 1.1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--muted);
-  font-size: 1.05rem;
-}
-
-.patient-info summary {
-  min-height: 28px;
-  color: var(--accent);
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.patient-info[open] summary { margin-bottom: 0.8rem; }
-.patient-info .audio-toggle { margin-bottom: 0.25rem; }
-.patient-info .patient-audio { display: none; }
-.patient-info p { margin: 0.75rem 0 0; }
-.patient-info p:last-child { font-style: italic; }
-.patient-info a { color: var(--accent); overflow-wrap: anywhere; }
-
 /* ---------- footer ---------- */
 
-/* Present in every state; body is a flex column, so it always sits below the
-   content instead of floating over it. The "MMIV" lettering fills the bottom
-   70 of the logo's 180 pixel rows, so the contact line is bottom-aligned with a
-   line box that tall, which centres the text on the lettering at any logo size. */
+/* The "MMIV" lettering fills the bottom 70 of the logo's 180 pixel rows, so the
+   contact line is bottom-aligned with a line box that tall, which centres the
+   text on the lettering at any logo size. */
 .site-footer {
   --footer-logo-h: 36px;
   flex: 0 0 auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: center;
-  flex-wrap: wrap;
   gap: clamp(1.25rem, 4vw, 3rem);
-  padding: 0.7rem clamp(1rem, 4vw, 2rem);
-  border-top: 1px solid var(--border);
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
 }
 
 .footer-logo {
   display: block;
-  height: var(--footer-logo-h);
   width: auto;
+  height: var(--footer-logo-h);
 }
 
 .footer-contact {
-  margin: 0;
   line-height: calc(var(--footer-logo-h) * 70 / 180);
   color: var(--muted);
   font-size: 0.9rem;
@@ -615,36 +817,21 @@ model-viewer {
 
 .footer-contact span { overflow-wrap: anywhere; }
 
-/* ---------- utilities and failure states ---------- */
-
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
-}
+/* ---------- failure states ---------- */
 
 .fallback {
   position: absolute;
   inset: auto 0 0 0;
-  margin: 0;
-  padding: 0.85rem 1rem;
-  background: rgba(46, 52, 64, 0.92);
-  border-top: 1px solid var(--border);
-  color: #ebcb8b;
-  font-size: 1rem;
+  padding: 14px 16px;
+  background: var(--raised);
+  border-top: 1px solid var(--line);
+  color: var(--warn-text);
 }
 
 .load-error {
+  max-width: 46ch;
   margin: 2rem auto;
   padding: 1rem 1.25rem;
-  max-width: 46ch;
   border: 1px solid var(--warn-border);
   border-radius: var(--radius);
   background: var(--warn-bg);
@@ -653,68 +840,72 @@ model-viewer {
   text-align: center;
 }
 
-body.load-failed .main { display: none; }
+body.load-failed .workspace { display: none; }
 
 /* ---------- responsive ---------- */
 
-@media (max-width: 900px) {
-  .report-layout { grid-template-columns: 1fr; }
-  .report-visual { max-width: 320px; justify-self: center; }
-}
+/* Wide landscape screens, the kiosk among them: a reading-station layout with
+   the image on the left and the step's text and controls beside it. The image
+   spans both rows and its spare height is shared between them, so the heading
+   sits just above the image's midline and the controls just below. */
+@media (min-width: 1000px) and (orientation: landscape) {
+  .workspace {
+    padding: 24px 32px;
+    grid-template-columns: var(--viewport-size) minmax(340px, 480px);
+    grid-template-rows: auto auto;
+    grid-template-areas: "view head" "view panel";
+    column-gap: clamp(40px, 5vw, 88px);
+    row-gap: 0;
+    justify-content: center;
+    justify-items: start;
+    text-align: left;
+  }
 
-@media (min-width: 900px) {
+  .viewport { width: var(--viewport-size); align-self: center; }
+  .prompt { align-self: end; padding-bottom: 24px; }
+  .panel { align-self: start; align-items: flex-start; width: 100%; }
+  .actions { justify-content: flex-start; }
   .report-volume { display: block; }
 }
 
+@media (max-width: 760px) {
+  .report-layout { grid-template-columns: 1fr; }
+  .report-visual { width: min(100%, 360px); justify-self: center; }
+}
+
 @media (max-width: 640px) {
-  .main { padding: 1.25rem 1rem; }
-  .stage, .stack, .slice-controls { width: min(100%, 560px); }
-  #state-inspect > .stage, #state-reveal > .stage { width: 100%; }
-  .report-panel { padding: 1.15rem; }
-  .report-layout { gap: 1.5rem; }
-  .report-body { font-size: 1rem; }
+  body { font-size: 1rem; }
+  .workspace { padding: 20px 16px; gap: 16px; }
+  .step-label { display: none; }
+  .step[aria-current="step"] .step-label { display: inline; }
 
   /* Two columns, with the primary call to action full width on its own row. */
-  .actions { width: 100%; gap: 0.6rem; align-items: stretch; }
-  .actions .btn { flex: 1 1 42%; white-space: normal; padding: 0.5rem 0.75rem; }
+  .actions { width: 100%; gap: 10px; }
+  .actions .btn { flex: 1 1 40%; min-height: 48px; padding: 0.5rem 0.75rem; }
   .actions .btn-primary { flex-basis: 100%; }
+  .report-actions #btn-restart { margin-left: 0; order: -1; }
 
-  .btn { min-height: 48px; padding: 0.5rem 1rem; }
-  .audio-toggle { min-height: 44px; }
+  .report-head { flex-direction: column; align-items: stretch; }
+  .segmented button { flex: 1 1 50%; }
+  .report-body { font-size: 1rem; }
 
-  .site-footer { flex-direction: column; align-items: center; gap: 0.6rem; padding: 0.9rem 1rem; }
+  #viewer-dialog { padding: 16px; }
+
+  .site-footer { flex-direction: column; align-items: center; gap: 8px; padding: 14px 16px; }
   .footer-contact { line-height: normal; }
 }
 
-/* Keep the complete experience visible on shorter displays. The footer costs a
-   little height everywhere, so the compact sizing starts just above 900px. */
-@media (min-width: 641px) and (max-height: 920px) {
-  .main { padding: 1rem 2rem; }
-  #state-inspect, #state-analyzing, #state-reveal, #state-explore { gap: 0.75rem; }
-  .prompt { font-size: clamp(1.3rem, 2.8vw, 1.8rem); }
-  .stage, .stack { width: min(58vmin, 460px); }
-  .btn { min-height: 48px; padding: 0 1.35rem; font-size: 0.98rem; }
-  .slice-controls { margin-top: 0.25rem; }
-  .btn-step { min-width: 48px; min-height: 44px; }
-  .report-panel { padding: 1.25rem 1.5rem; gap: 0.65rem; }
-  .report-volume model-viewer { height: 190px; }
-  .site-footer { --footer-logo-h: 30px; padding: 0.45rem 1rem; gap: 2rem; }
-}
-
-@media (min-width: 901px) {
-  .report-volume model-viewer { height: clamp(150px, 22vh, 210px); }
-}
-
-/* The 1920-wide kiosk can carry a slightly larger mark. */
+/* The 1920-wide kiosk carries a slightly larger mark. */
 @media (min-width: 1600px) and (min-height: 921px) {
   .site-footer { --footer-logo-h: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    transition: none !important;
     animation: none !important;
+    transition: none !important;
   }
-  .btn:active { transform: none; }
+  .scanline { display: none !important; }
+  .btn:active:not(:disabled) { transform: none; }
   .nn-edge { stroke-dasharray: none; }
 }

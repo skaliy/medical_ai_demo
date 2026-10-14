@@ -1,261 +1,310 @@
+"""Build everything the demo ships from one T1 MRI scan and its tumour mask.
+
+Writes the slice stack and overlays (app/assets/slices/), the tumour-only and
+head-with-tumour models (app/assets/tumor.glb, app/assets/brain_tumor.glb),
+app/case.json and prep/verify.json. See prep/README.md.
+"""
+import argparse
 import json
 from pathlib import Path
 
 import nibabel as nib
 import numpy as np
 import trimesh
+from PIL import Image
 from scipy import ndimage
 from skimage import measure
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "app"
-ASSETS = APP / "assets"
-ASSETS.mkdir(parents=True, exist_ok=True)
-SLICES = ASSETS / "slices"
-SLICES.mkdir(exist_ok=True)
+VERIFY_JSON = ROOT / "prep" / "verify.json"
+DEFAULT_IMAGE = ROOT / "vs_gk_1_t1_refT1.nii.gz"
+DEFAULT_MASK = ROOT / "vs_gk_1_seg_refT1.nii.gz"
 
-img = nib.load(ROOT / "vs_gk_1_t1_refT1.nii.gz")
-msk_img = nib.load(ROOT / "vs_gk_1_seg_refT1.nii.gz")
+CASE_ID = "vs_gk_1"
+# Asset paths relative to app/, exactly as written to case.json.
+WITH_HEAD_GLB = "assets/brain_tumor.glb"
+TUMOR_ONLY_GLB = "assets/tumor.glb"
+SLICE_URL = "assets/slices/slice_%03d.png"
+OVERLAY_URL = "assets/slices/overlay_%03d.png"
 
-assert img.shape == msk_img.shape, "image and mask shapes differ"
-assert np.allclose(img.affine, msk_img.affine, atol=1e-6), "image and mask affines differ"
-zooms = np.array(img.header.get_zooms()[:3], dtype=float)
-voxvol_mm3 = float(np.prod(zooms))
-
-data = img.get_fdata(dtype=np.float32)
-mask = np.asanyarray(msk_img.dataobj) > 0
-labels = np.unique(np.asanyarray(msk_img.dataobj))
-assert set(labels.tolist()) <= {0, 1}, f"unexpected mask labels: {labels}"
-
-# --- display orientation: radiological axial convention ---
-# Native LPS: axis0 -> Left, axis1 -> Posterior. As a plain array image that
-# puts the patient's right on top and the eyes (anterior) to the LEFT.
-# Swapping axes 0/1 makes rows increase toward P (top = anterior, eyes up)
-# and columns increase toward L (viewer left = patient right): the way a
-# radiologist reads axial slices. Mesh building below keeps the native array.
-data_disp = np.swapaxes(data, 0, 1)
-mask_disp = np.swapaxes(mask, 0, 1)
-assert nib.aff2axcodes(img.affine) == ("L", "P", "S")
-
-# --- slice selection: largest axial cross-section (axis 2 = S, unaffected) ---
-area = mask.sum(axis=(0, 1))
-k = int(np.argmax(area))
-print(f"chosen axial slice k={k}, area={int(area[k])} px")
-
-# --- volume from full 3D mask: voxel count x voxel volume ---
-voxel_count = int(mask.sum())
-vol_ml = voxel_count * voxvol_mm3 / 1000.0
-# One rounding for the whole demo: case.json is the single source of the number
-# every screen shows, so the dialog and the report can never disagree.
-vol_display = f"{vol_ml:.2f}".replace(".", ",")
-
-# --- shared intensity window over the whole volume (no flicker while scrolling)
-sub = data[::2, ::2, ::2]
-win_lo, win_hi = np.percentile(sub, (0.5, 99.5))
+WINDOW_PERCENTILES = (0.5, 99.5)
+OVERLAY_RGB = (255, 45, 149)  # magenta
+OVERLAY_FILL_ALPHA = 70
+TUMOR_RGBA = [224, 82, 150, 255]
+HEAD_RGBA = [242, 232, 214, 128]
 
 
-def window(sl):
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--image", type=Path, default=DEFAULT_IMAGE,
+                        help=f"T1 MRI as NIfTI (default: {DEFAULT_IMAGE.name} in the repository root)")
+    parser.add_argument("--mask", type=Path, default=DEFAULT_MASK,
+                        help=f"tumour mask as NIfTI, labels 0/1, on the same grid as --image "
+                             f"(default: {DEFAULT_MASK.name} in the repository root)")
+    return parser.parse_args()
+
+
+def load_scan(image_path, mask_path):
+    """Load image and mask, and check they share one LPS voxel grid."""
+    img = nib.load(image_path)
+    msk_img = nib.load(mask_path)
+    assert img.shape == msk_img.shape, "image and mask shapes differ"
+    assert np.allclose(img.affine, msk_img.affine, atol=1e-6), "image and mask affines differ"
+    labels = np.unique(np.asanyarray(msk_img.dataobj))
+    assert set(labels.tolist()) <= {0, 1}, f"unexpected mask labels: {labels}"
+    # to_display() and index_to_model() assume this orientation.
+    axcodes = nib.aff2axcodes(img.affine)
+    assert axcodes == ("L", "P", "S"), f"expected LPS orientation, got {''.join(axcodes)}"
+    data = img.get_fdata(dtype=np.float32)
+    mask = np.asanyarray(msk_img.dataobj) > 0
+    return img, data, mask, labels
+
+
+def to_display(vol):
+    """Native LPS array -> radiological axial display orientation.
+
+    Native LPS: axis0 -> Left, axis1 -> Posterior. As a plain array image that
+    puts the patient's right on top and the eyes (anterior) to the LEFT.
+    Swapping axes 0/1 makes rows increase toward P (top = anterior, eyes up)
+    and columns increase toward L (viewer left = patient right): the way a
+    radiologist reads axial slices. Mesh building keeps the native array.
+    """
+    return np.swapaxes(vol, 0, 1)
+
+
+def intensity_window(data):
+    """One window over the whole volume, so the stack does not flicker while scrolling."""
+    sub = data[::2, ::2, ::2]
+    win_lo, win_hi = np.percentile(sub, WINDOW_PERCENTILES)
+    return win_lo, win_hi
+
+
+def window(sl, win):
+    win_lo, win_hi = win
     g = np.clip((sl - win_lo) / (win_hi - win_lo), 0, 1)
     return (g * 255).astype(np.uint8)
 
 
 def overlay_rgba(m2):
-    from scipy import ndimage as ndi
-
-    filled = ndi.binary_fill_holes(m2)
+    """Translucent fill plus an opaque one-pixel outline of a 2D mask."""
+    filled = ndimage.binary_fill_holes(m2)
     rgba = np.zeros((*m2.shape, 4), dtype=np.uint8)
-    rgba[..., :3] = (255, 45, 149)  # magenta
-    rgba[..., 3] = (filled * 70).astype(np.uint8)
-    boundary = m2 & ~ndi.binary_erosion(m2)
+    rgba[..., :3] = OVERLAY_RGB
+    rgba[..., 3] = (filled * OVERLAY_FILL_ALPHA).astype(np.uint8)
+    boundary = m2 & ~ndimage.binary_erosion(m2)
     rgba[boundary, 3] = 255
     return rgba
 
 
-from PIL import Image
+def largest_component(binary):
+    labels, n = ndimage.label(binary)
+    if not n:
+        return binary
+    counts = np.bincount(labels.ravel())
+    return labels == int(np.argmax(counts[1:]) + 1)
 
-# --- full slice stack + per-slice overlays (radiological orientation) ---
-n_slices = data_disp.shape[2]
-mask_present = [bool(mask_disp[:, :, kk].any()) for kk in range(n_slices)]
-overlay_idx = [i for i, p in enumerate(mask_present) if p]
-for kk in range(n_slices):
-    Image.fromarray(window(data_disp[:, :, kk]), mode="L").save(SLICES / f"slice_{kk:03d}.png")
-    if mask_present[kk]:
-        Image.fromarray(overlay_rgba(mask_disp[:, :, kk]), mode="RGBA").save(
-            SLICES / f"overlay_{kk:03d}.png"
-        )
-print(f"wrote {n_slices} slices, overlays on {overlay_idx[0]}-{overlay_idx[-1]}")
 
-# --- best-slice single files (inspect/reveal states) ---
-Image.fromarray(window(data_disp[:, :, k]), mode="L").save(ASSETS / "slice.png")
-Image.fromarray(overlay_rgba(mask_disp[:, :, k]), mode="RGBA").save(ASSETS / "overlay.png")
+def write_slice_stack(data_disp, mask_disp, win):
+    """Write every axial slice, plus an overlay on each slice the mask touches.
 
-# --- meshes from the full 3D mask and the head, one shared frame ---
+    Returns the slice count and the indices that got an overlay.
+    """
+    n_slices = data_disp.shape[2]
+    overlay_idx = [kk for kk in range(n_slices) if mask_disp[:, :, kk].any()]
+    for kk in range(n_slices):
+        Image.fromarray(window(data_disp[:, :, kk], win)).save(APP / (SLICE_URL % kk))
+        if kk in overlay_idx:
+            Image.fromarray(overlay_rgba(mask_disp[:, :, kk])).save(APP / (OVERLAY_URL % kk))
+    print(f"wrote {n_slices} slices, overlays on {overlay_idx[0]}-{overlay_idx[-1]}")
+    return n_slices, overlay_idx
+
+
 # Model frame: x = -RAS x (viewer left = patient right, radiological), y = RAS z
-# (up), z = RAS y (anterior toward the camera). Every mesh below is placed in
-# this ONE frame and then translated by the same head centre, so the tumor sits
-# at its true position inside the head. (An earlier version centred each mesh on
-# its own centroid, which drew the tumor in the middle of the head.)
-def index_to_model(idx):
+# (up), z = RAS y (anterior toward the camera). Every mesh in the scene is placed
+# in this ONE frame and then translated by the same head centre, so the tumor
+# sits at its true position inside the head. Centring each mesh on its own
+# centroid instead would draw the tumor in the middle of the head.
+def index_to_model(affine, idx):
     hom = np.column_stack([idx, np.ones(len(idx))])
-    ras = (img.affine @ hom.T).T[:, :3]
+    ras = (affine @ hom.T).T[:, :3]
     return np.column_stack([-ras[:, 0], ras[:, 2], ras[:, 1]])
 
 
-# tumor: marching cubes on the exact mask, no decimation (it carries the measurement)
-verts, faces, normals, _ = measure.marching_cubes(mask.astype(np.float32), level=0.5)
-tumor_model = index_to_model(verts)
-tumor_mean = tumor_model.mean(axis=0)
-mesh = trimesh.Trimesh(vertices=tumor_model - tumor_mean, faces=faces, process=True)
-if mesh.volume < 0:
-    mesh.invert()  # ensure outward-facing winding for GLB rendering
-raw_vol_ml = abs(mesh.volume) / 1000.0
-trimesh.smoothing.filter_taubin(mesh, iterations=8)
-smooth_vol_ml = abs(mesh.volume) / 1000.0
-TUMOR_RGBA = [224, 82, 150, 255]
-mesh.visual.material = trimesh.visual.material.PBRMaterial(
-    baseColorFactor=TUMOR_RGBA, main_color=TUMOR_RGBA
-)
-mesh.export(ASSETS / "tumor.glb")  # centred on its own mean: the tumor-only view
+def build_tumor_mesh(mask, affine):
+    """Marching cubes on the exact mask, no decimation: the mesh carries the measurement.
 
-# --- head context: a clean outer shell of the head from the MRI volume ---
-# Display context only; the tumor mesh remains the measured mask.
-brain = data > 0.15 * np.percentile(data[data > 0], 98)
-brain = ndimage.binary_fill_holes(brain)
-brain = ndimage.binary_closing(brain, iterations=2)
-labels_brain, n_brain = ndimage.label(brain)
-if n_brain:
-    counts = np.bincount(labels_brain.ravel())
-    brain = labels_brain == int(np.argmax(counts[1:]) + 1)
-# Resample to a 1 mm grid, fill and close so sinuses and ear canals do not leave
-# noisy interior surfaces inside the translucent shell, keep the largest blob.
-iso = ndimage.zoom(brain.astype(np.uint8), zooms, order=0).astype(bool)
-iso = ndimage.binary_fill_holes(iso)
-ball = ndimage.iterate_structure(ndimage.generate_binary_structure(3, 1), 3)
-iso = ndimage.binary_closing(iso, structure=ball)
-iso = ndimage.binary_fill_holes(iso)
-labels_iso, n_iso = ndimage.label(iso)
-if n_iso:
-    counts = np.bincount(labels_iso.ravel())
-    iso = labels_iso == int(np.argmax(counts[1:]) + 1)
-iso = np.pad(iso, 2)
-head_verts_mm, head_faces, _, _ = measure.marching_cubes(iso.astype(np.float32), level=0.5)
-head_model = index_to_model((head_verts_mm - 2) / zooms)  # mm on the iso grid -> voxel index
-head_mesh = trimesh.Trimesh(vertices=head_model, faces=head_faces, process=True)
-if head_mesh.volume < 0:
-    head_mesh.invert()
-trimesh.smoothing.filter_taubin(head_mesh, lamb=0.5, nu=-0.53, iterations=10)
-head_center = head_mesh.vertices.mean(axis=0)
-head_mesh.vertices = head_mesh.vertices - head_center
-head_mesh.visual.material = trimesh.visual.material.PBRMaterial(
-    # alphaMode is required: without it a glTF material is OPAQUE and the alpha in
-    # baseColorFactor is ignored, so the head would hide the tumor completely.
-    baseColorFactor=[242, 232, 214, 128], alphaMode="BLEND",
-    metallicFactor=0.0, roughnessFactor=0.4
-)
+    Returns the smoothed mesh centred on its own mean (the tumor-only view), that
+    mean in the model frame, and the mesh volume in mL before and after smoothing.
+    """
+    verts, faces, _, _ = measure.marching_cubes(mask.astype(np.float32), level=0.5)
+    tumor_model = index_to_model(affine, verts)
+    tumor_mean = tumor_model.mean(axis=0)
+    mesh = trimesh.Trimesh(vertices=tumor_model - tumor_mean, faces=faces, process=True)
+    if mesh.volume < 0:
+        mesh.invert()  # ensure outward-facing winding for GLB rendering
+    raw_vol_ml = abs(mesh.volume) / 1000.0
+    trimesh.smoothing.filter_taubin(mesh, iterations=8)
+    smooth_vol_ml = abs(mesh.volume) / 1000.0
+    mesh.visual.material = trimesh.visual.material.PBRMaterial(
+        baseColorFactor=TUMOR_RGBA, main_color=TUMOR_RGBA
+    )
+    return mesh, tumor_mean, raw_vol_ml, smooth_vol_ml
 
-# the same smoothed tumor geometry, placed at its true position in the head frame
-tumor_in_head = mesh.copy()
-tumor_in_head.vertices = tumor_in_head.vertices + (tumor_mean - head_center)
 
-# --- the shown MRI slice as a textured plane through the head at its true height ---
-ni, nj = data.shape[0], data.shape[1]
-corners_idx = np.array([[-0.5, -0.5, k], [ni - 0.5, -0.5, k], [ni - 0.5, nj - 0.5, k], [-0.5, nj - 0.5, k]])
-quad_verts = index_to_model(corners_idx) - head_center
-quad_uv = np.array([[0, 1], [1, 1], [1, 0], [0, 0]], dtype=float)  # v origin bottom-left; row 0 (anterior) -> v = 1
-slice_gray = window(data_disp[:, :, k])
-keep = ndimage.binary_closing(slice_gray > 12, iterations=2)
-labels_keep, n_keep = ndimage.label(keep)
-if n_keep:
-    counts = np.bincount(labels_keep.ravel())
-    keep = labels_keep == int(np.argmax(counts[1:]) + 1)
-keep = ndimage.binary_erosion(ndimage.binary_fill_holes(keep), iterations=4)  # sit just inside the shell
-alpha = (ndimage.gaussian_filter(keep.astype(float), 1.0) * 255).clip(0, 255).astype(np.uint8)
-rgb = np.repeat(slice_gray[..., None], 3, axis=2).copy()
-grown = ndimage.maximum_filter(rgb, size=(5, 5, 1))
-fringe = alpha < 200
-rgb[fringe] = grown[fringe]  # no black fringe at the alpha-mask edge
-slice_tex = Image.fromarray(np.dstack([rgb, alpha]), "RGBA")
-quad = trimesh.Trimesh(vertices=quad_verts, faces=[[0, 1, 2], [0, 2, 3]], process=False)
-quad.visual = trimesh.visual.TextureVisuals(
-    uv=quad_uv,
-    material=trimesh.visual.material.PBRMaterial(
-        baseColorTexture=slice_tex, baseColorFactor=[255, 255, 255, 255],
-        alphaMode="MASK", doubleSided=True
-    ),
-)
+def head_mask(data):
+    """Voxel mask of the head. Display context only; the tumor stays the measured mask."""
+    head = data > 0.15 * np.percentile(data[data > 0], 98)
+    head = ndimage.binary_fill_holes(head)
+    head = ndimage.binary_closing(head, iterations=2)
+    return largest_component(head)
 
-combined = trimesh.Scene({"brain": head_mesh, "tumor": tumor_in_head, "slice": quad})
-combined.export(ASSETS / "brain_tumor.glb")
-# Post-process the shipped app/assets/brain_tumor.glb with prep/optimize_scene.mjs
-# (@gltf-transform 4.5 + meshoptimizer): weld, simplify the head mesh ONLY to 25 %,
-# quantize positions (KHR_mesh_quantization, decoded natively by <model-viewer>,
-# no runtime decoder, still fully offline), and mark the slice material unlit.
-# The tumor keeps its exact triangle count. Result: ~8 MB -> ~1.4 MB.
 
-# --- laterality cross-check: tumor centroid RAS-x vs brain-centroid RAS-x ---
-cen_ras = (img.affine @ np.append(ndimage.center_of_mass(mask), 1))[:3]
-brain_cen_ras = (img.affine @ np.append(ndimage.center_of_mass(brain), 1))[:3]
-side = "venstre" if cen_ras[0] < brain_cen_ras[0] else "høyre"
+def build_head_mesh(head, zooms, affine):
+    """A clean, translucent outer shell of the head, centred on its own mean.
 
-# --- report (clinically supplied text; the app substitutes {volume}) ---
-# "{volume}" stands for display + non-breaking space + unit, so the number and its
-# unit can never be split across a line break or drift apart from the measurement.
-# "R:" is the radiology shorthand for the conclusion heading, chosen by the author
-# in commit f92402c ("content: abbreviate radiology conclusion heading").
-report_paras = [
-    "MR caput",
-    "Kontrastladende tumor i cerebellopontine vinkel med utbredelse mot indre øregang, "
-    "forenlig med vestibularisschwannom. Lett lokal påvirkning av omkringliggende strukturer.",
-    "KI-generert tumorvolum: {volume}.",
-    "R:",
-    "Funn forenlig med vestibularisschwannom. Tumorvolum {volume}, beregnet ved "
-    "KI-basert 3D-segmentering.",
-]
+    Returns the mesh and the centre that was subtracted (model frame).
+    """
+    # Resample to a 1 mm grid, fill and close so sinuses and ear canals do not leave
+    # noisy interior surfaces inside the translucent shell, keep the largest blob.
+    iso = ndimage.zoom(head.astype(np.uint8), zooms, order=0).astype(bool)
+    iso = ndimage.binary_fill_holes(iso)
+    ball = ndimage.iterate_structure(ndimage.generate_binary_structure(3, 1), 3)
+    iso = ndimage.binary_closing(iso, structure=ball)
+    iso = ndimage.binary_fill_holes(iso)
+    iso = largest_component(iso)
+    iso = np.pad(iso, 2)
+    verts_mm, faces, _, _ = measure.marching_cubes(iso.astype(np.float32), level=0.5)
+    model = index_to_model(affine, (verts_mm - 2) / zooms)  # mm on the iso grid -> voxel index
+    mesh = trimesh.Trimesh(vertices=model, faces=faces, process=True)
+    if mesh.volume < 0:
+        mesh.invert()
+    trimesh.smoothing.filter_taubin(mesh, lamb=0.5, nu=-0.53, iterations=10)
+    center = mesh.vertices.mean(axis=0)
+    mesh.vertices = mesh.vertices - center
+    mesh.visual.material = trimesh.visual.material.PBRMaterial(
+        # alphaMode is required: without it a glTF material is OPAQUE and the alpha in
+        # baseColorFactor is ignored, so the head would hide the tumor completely.
+        baseColorFactor=HEAD_RGBA, alphaMode="BLEND",
+        metallicFactor=0.0, roughnessFactor=0.4
+    )
+    return mesh, center
 
-case = {
-    "caseId": "vs_gk_1",
-    "caseTitle": "MR-snitt av hjernen",
-    "assets": {
-        "slice": "assets/slice.png",
-        "overlay": "assets/overlay.png",
-        "mesh": "assets/tumor.glb",
-        "brainTumor": "assets/brain_tumor.glb",
-    },
-    "stack": {
-        "sliceUrl": "assets/slices/slice_%03d.png",
-        "overlayUrl": "assets/slices/overlay_%03d.png",
-        "count": n_slices,
-        "best": k,
-        "overlayRange": [overlay_idx[0], overlay_idx[-1]],
-    },
-    "volume": {"exactMl": round(vol_ml, 3), "display": vol_display, "unit": "cm\u00b3"},
-    "slice": {"index": k, "plane": "axial"},
-    "report": {
-        "title": "KI-generert rapportutkast.",
-        "textNob": report_paras,
-    },
-}
-(APP / "case.json").write_text(json.dumps(case, ensure_ascii=False, indent=2), encoding="utf-8")
 
-verify = {
-    "shape": list(img.shape),
-    "zooms_mm": zooms.round(4).tolist(),
-    "orientation": "".join(nib.aff2axcodes(img.affine)),
-    "display_orientation": "radiological axial (swapaxes 0/1: rows->P, cols->L)",
-    "intensity_window": [round(float(win_lo), 3), round(float(win_hi), 3)],
-    "affine_equal": True,
-    "mask_labels": labels.tolist(),
-    "mask_slice_k": sorted(int(i) for i in np.where(mask.any(axis=(0, 1)))[0]),
-    "shown_slice_k": k,
-    "stack_count": n_slices,
-    "voxel_count": voxel_count,
-    "voxel_volume_mm3": round(voxvol_mm3, 6),
-    "volume_ml": round(vol_ml, 4),
-    "marching_cubes_raw_volume_ml": round(raw_vol_ml, 4),
-    "marching_cubes_smoothed_volume_ml": round(smooth_vol_ml, 4),
-    "tumor_centroid_RAS_mm": cen_ras.round(2).tolist(),
-    "brain_centroid_RAS_mm": brain_cen_ras.round(2).tolist(),
-    "laterality": side,
-}
-(ROOT / "prep" / "verify.json").write_text(json.dumps(verify, ensure_ascii=False, indent=2))
-print(json.dumps(verify, ensure_ascii=False, indent=2))
+def build_slice_plane(slice_gray, shape, k, affine, head_center):
+    """The shown MRI slice as a textured plane through the head at its true height."""
+    ni, nj = shape[0], shape[1]
+    corners_idx = np.array([[-0.5, -0.5, k], [ni - 0.5, -0.5, k], [ni - 0.5, nj - 0.5, k], [-0.5, nj - 0.5, k]])
+    quad_verts = index_to_model(affine, corners_idx) - head_center
+    quad_uv = np.array([[0, 1], [1, 1], [1, 0], [0, 0]], dtype=float)  # v origin bottom-left; row 0 (anterior) -> v = 1
+    keep = ndimage.binary_closing(slice_gray > 12, iterations=2)
+    keep = largest_component(keep)
+    keep = ndimage.binary_erosion(ndimage.binary_fill_holes(keep), iterations=4)  # sit just inside the shell
+    alpha = (ndimage.gaussian_filter(keep.astype(float), 1.0) * 255).clip(0, 255).astype(np.uint8)
+    rgb = np.repeat(slice_gray[..., None], 3, axis=2).copy()
+    grown = ndimage.maximum_filter(rgb, size=(5, 5, 1))
+    fringe = alpha < 200
+    rgb[fringe] = grown[fringe]  # no black fringe at the alpha-mask edge
+    texture = Image.fromarray(np.dstack([rgb, alpha]))
+    quad = trimesh.Trimesh(vertices=quad_verts, faces=[[0, 1, 2], [0, 2, 3]], process=False)
+    quad.visual = trimesh.visual.TextureVisuals(
+        uv=quad_uv,
+        material=trimesh.visual.material.PBRMaterial(
+            baseColorTexture=texture, baseColorFactor=[255, 255, 255, 255],
+            alphaMode="MASK", doubleSided=True
+        ),
+    )
+    return quad
+
+
+def ras_centroid(affine, binary):
+    return (affine @ np.append(ndimage.center_of_mass(binary), 1))[:3]
+
+
+def main():
+    args = parse_args()
+    img, data, mask, labels = load_scan(args.image, args.mask)
+    zooms = np.array(img.header.get_zooms()[:3], dtype=float)
+    voxvol_mm3 = float(np.prod(zooms))
+    data_disp = to_display(data)
+    mask_disp = to_display(mask)
+
+    # Shown slice: the largest axial cross-section (axis 2 = S, unaffected by the swap).
+    area = mask.sum(axis=(0, 1))
+    k = int(np.argmax(area))
+    print(f"chosen axial slice k={k}, area={int(area[k])} px")
+
+    # Volume from the full 3D mask: voxel count x voxel volume.
+    voxel_count = int(mask.sum())
+    vol_ml = voxel_count * voxvol_mm3 / 1000.0
+    # One rounding for the whole demo: case.json is the single source of the number
+    # every screen shows, so the dialog and the report can never disagree.
+    vol_display = f"{vol_ml:.2f}".replace(".", ",")
+
+    win = intensity_window(data)
+    (APP / SLICE_URL).parent.mkdir(parents=True, exist_ok=True)
+    n_slices, overlay_idx = write_slice_stack(data_disp, mask_disp, win)
+
+    tumor, tumor_mean, raw_vol_ml, smooth_vol_ml = build_tumor_mesh(mask, img.affine)
+    tumor.export(APP / TUMOR_ONLY_GLB)
+
+    head = head_mask(data)
+    head_mesh, head_center = build_head_mesh(head, zooms, img.affine)
+    # The same smoothed tumor geometry, placed at its true position in the head frame.
+    # copy() drops the material, which optimize_scene.mjs needs, so set it again.
+    tumor_in_head = tumor.copy()
+    tumor_in_head.vertices = tumor_in_head.vertices + (tumor_mean - head_center)
+    tumor_in_head.visual.material = tumor.visual.material
+    plane = build_slice_plane(window(data_disp[:, :, k], win), data.shape, k, img.affine, head_center)
+    scene = trimesh.Scene({"brain": head_mesh, "tumor": tumor_in_head, "slice": plane})
+    scene.export(APP / WITH_HEAD_GLB)
+    # Then post-process brain_tumor.glb with prep/optimize_scene.mjs: it simplifies
+    # the head only, quantizes positions and marks the slice material unlit, which
+    # trimesh cannot express. The tumor keeps its exact triangle count.
+
+    # Laterality cross-check: tumor centroid vs head centroid along RAS x (+x = right).
+    cen_ras = ras_centroid(img.affine, mask)
+    head_cen_ras = ras_centroid(img.affine, head)
+    side = "venstre" if cen_ras[0] < head_cen_ras[0] else "høyre"
+
+    case = {
+        "caseId": CASE_ID,
+        "models": {"withHead": WITH_HEAD_GLB, "tumorOnly": TUMOR_ONLY_GLB},
+        "stack": {
+            "sliceUrl": SLICE_URL,
+            "overlayUrl": OVERLAY_URL,
+            "count": n_slices,
+            "best": k,
+            "overlayRange": [overlay_idx[0], overlay_idx[-1]],
+        },
+        "volume": {"exactMl": round(vol_ml, 3), "display": vol_display, "unit": "cm³"},
+    }
+    (APP / "case.json").write_text(json.dumps(case, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    win_lo, win_hi = win
+    verify = {
+        "shape": list(img.shape),
+        "zooms_mm": zooms.round(4).tolist(),
+        "orientation": "".join(nib.aff2axcodes(img.affine)),
+        "display_orientation": "radiological axial (swapaxes 0/1: rows->P, cols->L)",
+        "intensity_window": [round(float(win_lo), 3), round(float(win_hi), 3)],
+        "affine_equal": True,
+        "mask_labels": labels.tolist(),
+        "mask_slice_k": sorted(int(i) for i in np.where(mask.any(axis=(0, 1)))[0]),
+        "shown_slice_k": k,
+        "stack_count": n_slices,
+        "voxel_count": voxel_count,
+        "voxel_volume_mm3": round(voxvol_mm3, 6),
+        "volume_ml": round(vol_ml, 4),
+        "marching_cubes_raw_volume_ml": round(raw_vol_ml, 4),
+        "marching_cubes_smoothed_volume_ml": round(smooth_vol_ml, 4),
+        "tumor_centroid_RAS_mm": cen_ras.round(2).tolist(),
+        "brain_centroid_RAS_mm": head_cen_ras.round(2).tolist(),
+        "laterality": side,
+    }
+    VERIFY_JSON.write_text(json.dumps(verify, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(verify, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()

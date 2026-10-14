@@ -1,6 +1,6 @@
 # Cloudflare Pages response headers for the static demo in this directory.
-# Rules are matched top to bottom; the site-wide block comes first, the narrower
-# cache rules after it.
+# A request gets the headers of every rule it matches: the site-wide block first,
+# then the cache rules, which do not overlap.
 
 /*
   X-Content-Type-Options: nosniff
@@ -19,7 +19,10 @@
 #                            without createImageBitmap (older Safari/Firefox).
 #   style-src ... 'unsafe-inline'
 #                            <model-viewer> writes inline styles into its own
-#                            shadow DOM; nothing in app/ uses a style attribute.
+#                            shadow DOM; nothing in app/ uses a style attribute
+#                            (app.js sets element.style, which CSP allows).
+#
+# Everything else, the self-hosted font included, is covered by default-src 'self'.
 #   script-src ... 'wasm-unsafe-eval'
 #                            model-viewer calls WebAssembly.instantiate while
 #                            setting up its Draco/KTX2 decoders. Without it the
@@ -33,15 +36,17 @@
 # A future Draco- or KTX2-compressed asset would, and would need
 # `worker-src 'self' blob:` added here.
 
-# Pinned third-party library; it is replaced only under a new filename.
+# Pinned third-party files. Each name carries a version or a content hash, so a
+# new copy always gets a new filename and the year-long cache is safe.
 /vendor/*
   Cache-Control: public, max-age=31536000, immutable
 
-# Slices, meshes and audio are regenerated in place under stable filenames by
-# prep/prepare_assets.py, so a week rather than a year, and never immutable.
+# Slices and meshes are regenerated in place by prep/prepare_assets.py, and the
+# audio is replaced by hand, all under stable filenames: a week rather than a
+# year, and never immutable.
 /assets/*
   Cache-Control: public, max-age=604800
 
-# The single source of truth for the case; never serve a stale copy.
+# The measured case data the app reads at boot; never serve a stale copy.
 /case.json
   Cache-Control: no-store
