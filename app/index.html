@@ -33,7 +33,6 @@
   <div class="viewport" id="viewport">
     <img class="slice-img" id="slice-img" alt="MR-snitt av hjernen">
     <img class="overlay-img" id="overlay-img" alt="" hidden>
-    <div class="scanline" aria-hidden="true"></div>
   </div>
 
   <section class="state" id="state-inspect" aria-labelledby="inspect-h">
@@ -49,7 +48,53 @@
   <section class="state" id="state-analyzing" aria-labelledby="analyzing-h">
     <h2 class="prompt" id="analyzing-h" tabindex="-1"><span class="nowrap">KI-modellen</span> analyserer …</h2>
     <div class="panel">
-      <div class="nn-stage" id="nn-stage" role="img" aria-label="Illustrasjon av et kunstig nevralt nettverk"></div>
+      <!-- A U-Net: the image goes down the encoder, across the bottom and back up
+           the decoder, with skip connections across, and comes out as the
+           marking. app.js lights each data-stage as the status line advances;
+           d1 and d2 stagger the parts within a stage. -->
+      <svg class="unet" id="unet" viewBox="0 0 640 360" role="img"
+           aria-label="Illustrasjon av et U-Net, en type nevralt nettverk som gjør MR-bildet om til en markering">
+        <clipPath id="thumb-clip" clipPathUnits="objectBoundingBox"><rect width="1" height="1" rx="0.07"/></clipPath>
+
+        <g data-stage="0">
+          <image id="unet-in" x="8" y="32" width="120" height="120" clip-path="url(#thumb-clip)"/>
+          <rect class="frame" x="8" y="32" width="120" height="120" rx="8"/>
+          <line class="link" x1="128" y1="92" x2="146" y2="92"/>
+        </g>
+        <g data-stage="1">
+          <rect class="block" x="146" y="37" width="10" height="110" rx="2"/>
+          <line class="link" x1="151" y1="147" x2="192" y2="149"/>
+          <rect class="block d1" x="184" y="149" width="16" height="74" rx="2"/>
+          <line class="link d1" x1="192" y1="223" x2="240" y2="234"/>
+          <rect class="block d2" x="228" y="234" width="24" height="48" rx="2"/>
+        </g>
+        <g data-stage="2">
+          <line class="link" x1="240" y1="282" x2="300" y2="302"/>
+          <rect class="block d1" x="290" y="302" width="60" height="32" rx="2"/>
+          <line class="link d2" x1="340" y1="302" x2="400" y2="282"/>
+        </g>
+        <g data-stage="3">
+          <line class="link skip" x1="252" y1="258" x2="388" y2="258"/>
+          <rect class="block" x="388" y="234" width="24" height="48" rx="2"/>
+          <line class="link d1" x1="400" y1="234" x2="448" y2="223"/>
+          <line class="link skip d1" x1="200" y1="186" x2="440" y2="186"/>
+          <rect class="block d1" x="440" y="149" width="16" height="74" rx="2"/>
+          <line class="link d2" x1="448" y1="149" x2="489" y2="147"/>
+          <line class="link skip d2" x1="156" y1="92" x2="484" y2="92"/>
+          <rect class="block d2" x="484" y="37" width="10" height="110" rx="2"/>
+        </g>
+        <g data-stage="4">
+          <line class="link" x1="494" y1="92" x2="512" y2="92"/>
+          <g class="unet-out">
+            <image id="unet-out-slice" x="512" y="32" width="120" height="120" clip-path="url(#thumb-clip)"/>
+            <image id="unet-out-overlay" x="512" y="32" width="120" height="120" clip-path="url(#thumb-clip)"/>
+          </g>
+          <rect class="frame frame-out" x="512" y="32" width="120" height="120" rx="8"/>
+        </g>
+
+        <text x="68" y="180">MR-snitt</text>
+        <text x="572" y="180">KI-markering</text>
+      </svg>
       <p class="analyzing-status" id="analyzing-status" role="status" aria-live="polite"></p>
       <div class="progress" aria-hidden="true"><div class="progress-fill" id="progress-fill"></div></div>
       <p class="note">Animasjonen viser trinnene modellen går gjennom. Resultatet er regnet ut på forhånd.</p>

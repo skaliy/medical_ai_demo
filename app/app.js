@@ -145,42 +145,19 @@ function markTumourOnSlider() {
 
 /* ---------- analysis ---------- */
 
-function buildNeuralNet() {
-  const NS = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 640 360');
-  svg.setAttribute('width', '100%');
-  svg.setAttribute('height', '100%');
-
-  const layers = [4, 6, 6, 2];
-  const pos = layers.map((count, li) => {
-    const x = 70 + li * (500 / (layers.length - 1));
-    const gap = 280 / Math.max(count - 1, 1);
-    return Array.from({ length: count }, (_, ni) => ({ x, y: 180 - (gap * (count - 1)) / 2 + ni * gap }));
-  });
-  const add = (tag, attrs, layer) => {
-    const node = document.createElementNS(NS, tag);
-    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
-    node.style.animationDelay = `${(layer * 0.22).toFixed(2)}s`;
-    svg.appendChild(node);
-  };
-
-  for (let li = 0; li < pos.length - 1; li++) {
-    for (const a of pos[li]) {
-      for (const b of pos[li + 1]) add('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'nn-edge' }, li);
-    }
+/* Lights the U-Net up to the given stage; -1 clears it. */
+function lightUnet(stage) {
+  for (const group of el('unet').querySelectorAll('[data-stage]')) {
+    group.classList.toggle('is-lit', Number(group.dataset.stage) <= stage);
   }
-  pos.forEach((layer, li) => {
-    const cls = li === pos.length - 1 ? 'nn-node nn-out' : 'nn-node';
-    for (const p of layer) add('circle', { cx: p.x, cy: p.y, r: 11, class: cls }, li);
-  });
-  el('nn-stage').appendChild(svg);
 }
 
 function startAnalysis() {
   setState('analyzing');
   const duration = REDUCED_MOTION ? ANALYZE_REDUCED_MS : ANALYZE_MS;
   const steps = templateItems('analyze-steps').map((li) => li.textContent.trim());
+  /* The diagram's stages advance with time, whatever the number of status lines. */
+  const stages = el('unet').querySelectorAll('[data-stage]').length;
   const status = el('analyzing-status');
   const fill = el('progress-fill');
   const started = performance.now();
@@ -193,12 +170,14 @@ function startAnalysis() {
   if (REDUCED_MOTION) {
     fill.style.width = '100%';
     status.textContent = steps[steps.length - 1];
+    lightUnet(stages - 1);
     return;
   }
   const tick = () => {
     const frac = Math.min((performance.now() - started) / duration, 1);
     fill.style.width = frac >= 1 ? '100%' : `${(frac * 100).toFixed(1)}%`;
     status.textContent = steps[Math.min(Math.floor(frac * steps.length), steps.length - 1)];
+    lightUnet(Math.min(Math.floor(frac * stages), stages - 1));
     if (frac < 1) analysisFrame = requestAnimationFrame(tick);
   };
   tick();
@@ -451,6 +430,7 @@ function restart() {
   el('patient-report-audio-toggle').hidden = true;
   el('progress-fill').style.width = '0%';
   el('analyzing-status').textContent = '';
+  lightUnet(-1);
   setLabel(el('btn-to-report'), false);
   setLabel(el('btn-brain-toggle'), true);
   showSlice(caseData.stack.best);
@@ -551,7 +531,9 @@ function setUp() {
   for (const button of document.querySelectorAll('[data-label]')) setLabel(button, false);
   setLabel(el('btn-brain-toggle'), true);
   markTumourOnSlider();
-  buildNeuralNet();
+  el('unet-in').setAttribute('href', stackUrl('sliceUrl', best));
+  el('unet-out-slice').setAttribute('href', stackUrl('sliceUrl', best));
+  el('unet-out-overlay').setAttribute('href', stackUrl('overlayUrl', best));
   showSlice(best);
   /* Warm both 3D models (about 1.6 MB together) before anyone opens the dialog. */
   for (const url of Object.values(caseData.models)) fetch(url).catch(() => {});

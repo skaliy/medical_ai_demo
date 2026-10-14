@@ -348,86 +348,57 @@ body[data-state="report"] #state-report { display: block; }
   object-fit: contain;
 }
 
-/* The one orchestrated moment: while the model "analyses", a scan line sweeps
-   the image; on the reveal it makes one last pass and paints the marking in
-   behind it. */
-.scanline {
-  display: none;
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 2px;
-  background: var(--accent);
-  pointer-events: none;
-}
-
-body[data-state="analyzing"] .scanline {
-  display: block;
-  animation: scan 1.6s ease-in-out infinite alternate;
-}
-
-body[data-state="reveal"] .scanline {
-  display: block;
-  animation: scan-once 1.1s ease-out both;
-}
-
+/* The marking fades in on the reveal, and again whenever it is shown. In the
+   slice browser it appears at once, so scrubbing stays exact. */
 body[data-state="reveal"] .overlay-img {
-  animation: paint-down 1.1s ease-out both;
+  animation: fade-in 600ms ease both;
 }
 
-@keyframes scan {
-  from { top: 0; }
-  to { top: calc(100% - 2px); }
-}
-
-@keyframes scan-once {
-  0% { top: 0; opacity: 1; }
-  85% { opacity: 1; }
-  100% { top: 100%; opacity: 0; }
-}
-
-@keyframes paint-down {
-  from { clip-path: inset(0 0 100% 0); }
-  to { clip-path: inset(0); }
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* ---------- analyzing ---------- */
 
-.nn-stage {
+/* The U-Net lights up stage by stage: grey parts are still to come, cyan parts
+   have run, and the output is the finding, so it lights magenta. */
+.unet {
+  display: block;
   width: 100%;
-  aspect-ratio: 16 / 9;
-  max-height: 240px;
+  height: auto;
+  padding: 12px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  overflow: hidden;
 }
 
-.nn-edge {
-  stroke: #3a4c63;
-  stroke-width: 1.5;
-  stroke-dasharray: 5 9;
-  animation: nn-flow 1.1s linear infinite;
+.unet .block,
+.unet .link,
+.unet .frame {
+  stroke: var(--line);
+  stroke-width: 2;
+  transition: fill 250ms ease, stroke 250ms ease, opacity 250ms ease;
 }
 
-.nn-node {
-  fill: var(--raised);
-  stroke: var(--accent);
-  stroke-width: 2.5;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: nn-pulse 1.7s ease-in-out infinite;
-}
+.unet .block { fill: var(--raised); }
+.unet .frame { fill: none; }
+.unet .skip { stroke-dasharray: 6 6; }
+.unet .unet-out { opacity: 0; transition: opacity 400ms ease; }
 
-/* The output layer is the finding. */
-.nn-node.nn-out { stroke: var(--finding); }
+.unet .d1 { transition-delay: 150ms; }
+.unet .d2 { transition-delay: 300ms; }
 
-@keyframes nn-flow { to { stroke-dashoffset: -28; } }
+.unet .is-lit .block { fill: rgb(139 216 237 / 0.22); stroke: var(--accent); }
+.unet .is-lit .link,
+.unet .is-lit .frame { stroke: var(--accent); }
+.unet .is-lit .frame-out { stroke: var(--finding); }
+.unet .is-lit .unet-out { opacity: 1; }
 
-@keyframes nn-pulse {
-  0%, 100% { transform: scale(1); opacity: 0.75; }
-  50% { transform: scale(1.28); opacity: 1; }
+.unet text {
+  fill: var(--muted);
+  font-size: 22px;
+  text-anchor: middle;
 }
 
 .analyzing-status {
@@ -905,7 +876,5 @@ body.load-failed .workspace { display: none; }
     animation: none !important;
     transition: none !important;
   }
-  .scanline { display: none !important; }
   .btn:active:not(:disabled) { transform: none; }
-  .nn-edge { stroke-dasharray: none; }
 }
